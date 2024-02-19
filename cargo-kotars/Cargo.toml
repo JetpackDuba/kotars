@@ -1,5 +1,5 @@
 [package]
-name = "cargo-katars"
+name = "cargo-kotars"
 version = "0.1.0"
 edition = "2021"
 
