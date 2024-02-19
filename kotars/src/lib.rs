@@ -8,28 +8,9 @@ use syn::{FnArg, ImplItem, ItemFn, ItemImpl, ItemStruct, LitStr, parse_macro_inp
 use syn::__private::{str, TokenStream2};
 use syn::punctuated::Punctuated;
 use syn::token::Comma;
+use kotars_common::{Function, JniType, Parameter, RsStruct};
 
 const PKG_NAME: &str = "<PKG_NAME>";
-
-#[derive(Clone, Serialize, Deserialize)]
-struct Parameter {
-    name: String,
-    ty: JniType,
-}
-
-#[derive(Serialize, Deserialize)]
-struct Function {
-    name: String,
-    parameters: Vec<Parameter>,
-    return_type: Option<JniType>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct RsStruct {
-    name: String,
-    fields: Vec<(Option<String>, JniType)>,
-}
-
 
 #[proc_macro]
 pub fn jni_init(input: TokenStream) -> TokenStream {
@@ -421,24 +402,6 @@ fn generate_rust_functions(
 //         .join(",\n")
 // }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-enum JniType {
-    Int32,
-    String,
-    Boolean,
-    CustomType(String),
-}
-
-impl From<String> for JniType {
-    fn from(value: String) -> Self {
-        match value.as_str() {
-            "i32" => JniType::Int32,
-            "String" => JniType::String,
-            "bool" => JniType::Boolean,
-            _ => JniType::CustomType(value.to_string()),
-        }
-    }
-}
 
 fn string_to_camel_case(text: &str) -> String {
     text

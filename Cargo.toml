@@ -1,0 +1,7 @@
+[workspace]
+members = [
+  "cargo-kotars",
+  "kotars",
+  "kotars-common"
+]
+resolver = "2"
