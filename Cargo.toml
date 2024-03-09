@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "cargo-kotars",
+  "example",
   "kotars",
   "kotars-common"
 ]
