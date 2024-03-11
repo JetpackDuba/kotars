@@ -80,7 +80,7 @@ fn main() {
                 let struc: RsStruct = serde_json::from_str(json_line).expect(format!("Unable to deserialize class {json_line}").as_str());
                 let functions = functions
                     .iter()
-                    .filter(|func| func.struct_name == struc.name)
+                    .filter(|func| func.owner_name == struc.name)
                     .collect::<Vec<&Function>>();
 
                 Some((struc, functions))
@@ -214,7 +214,7 @@ fn format_function(func: &Function) -> String {
 }
 
 fn format_function_mapping(func: &Function, is_static: bool) -> String {
-    let struct_name = &func.struct_name;
+    let struct_name = &func.owner_name;
     let name = string_to_camel_case(&func.name);
 
     let mut parameters_formatted = format_func_parameters(&func.parameters, is_static);

@@ -1,13 +1,16 @@
+mod types_transformations;
+
 extern crate proc_macro;
 
 use proc_macro::TokenStream;
 
 use quote::{quote, ToTokens};
-use syn::{FnArg, ImplItem, ItemImpl, ItemStruct, LitStr, parse_macro_input, ReturnType, Visibility};
+use syn::{FnArg, ImplItem, ItemImpl, ItemStruct, ItemTrait, LitStr, parse_macro_input, ReturnType, TraitItem, Visibility};
 use syn::__private::{str, TokenStream2};
 use syn::punctuated::Punctuated;
 use syn::token::Comma;
 use kotars_common::{Field, Function, JniType, Parameter, RsStruct, string_to_camel_case};
+use crate::types_transformations::{transform_jni_type_to_rust, transform_rust_to_jni_type};
 
 const PKG_NAME: &str = "<PKG_NAME>";
 
@@ -62,23 +65,17 @@ pub fn jni_init(input: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn jni_struct_impl(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let input_impl = parse_macro_input!(item as ItemImpl);
-
-    // Extract the struct name
     let struct_name = input_impl.self_ty.as_ref().to_token_stream().to_string();
-    println!("Struct name: {}", struct_name);
 
     let functions = input_impl.items.iter().filter_map(|item| {
         if let ImplItem::Fn(method) = item {
             let method_name = &method.sig.ident;
-
-            println!("Loading parameters");
             let parameters = get_parameters_from_method(&method.sig.inputs);
-            println!("Done with parameters, loading return type");
             let return_type = get_return_type_from_method(&method.sig.output);
-            println!("Done with return type");
+            
             Some(
                 Function {
-                    struct_name: struct_name.clone(),
+                    owner_name: struct_name.clone(),
                     name: method_name.to_string(),
                     parameters,
                     return_type,
@@ -89,11 +86,9 @@ pub fn jni_struct_impl(_attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     }).collect::<Vec<Function>>();
 
-    // generate_kotlin_source(&struct_name, &functions);
     let new_functions = generate_rust_functions(&struct_name, &functions);
 
     let output = quote! {
-        // You can use struct_name and functions wherever necessary in your generated code
         #input_impl
         #(#new_functions)*
     };
@@ -151,53 +146,10 @@ pub fn jni_data_class(_attr: TokenStream, input: TokenStream) -> TokenStream {
                 }
             };
 
+            let transformation = rust_property_to_jni_type(ty, &param, &struct_parameter);
+            let param_into_array = generate_field_mapping_into_array(ty, &param);
 
-            match ty {
-                JniType::Int32 => {
-                    let transformation = quote! {
-                        let #param = #struct_parameter as jni::sys::jint;
-                    };
-
-                    let param_into_array = quote! { #param.into() };
-                    (transformation, param_into_array)
-                }
-                JniType::Int64 => {
-                    let transformation = quote! {
-                        let #param = #struct_parameter as jni::sys::jlong;
-                    };
-
-                    let param_into_array = quote! { #param.into() };
-                    (transformation, param_into_array)
-                }
-                JniType::String => {
-                    let transformation = quote! {
-                        let #param: jni::objects::JString = #struct_parameter.into_env(env);
-                        let #param: jni::objects::JObject = #param.into();
-                        let #param: jni::objects::JValue = jni::objects::JValue::Object(&#param);
-                    };
-
-                    let param_into_array = quote! { #param };
-                    (transformation, param_into_array)
-                }
-                JniType::Boolean => {
-                    let transformation = quote! {
-                        let #param = #struct_parameter as jni::sys::jboolean;
-                    };
-
-                    let param_into_array = quote! { #param.into() };
-                    (transformation, param_into_array)
-                }
-                JniType::CustomType(_) => {
-                    let transformation = quote! {
-                        let #param: jni::objects::JObject = #struct_parameter.into_env(env);
-                        let #param: jni::objects::JValue = jni::objects::JValue::Object(&#param);
-                    };
-
-                    let param_into_array = quote! { #param };
-                    (transformation, param_into_array)
-                }
-                JniType::Receiver(_) => panic!("Structs can not have self as type")
-            }
+            (transformation, param_into_array)
         })
         .collect::<Vec<(TokenStream2, TokenStream2)>>()
         .into_iter()
@@ -234,8 +186,6 @@ pub fn jni_data_class(_attr: TokenStream, input: TokenStream) -> TokenStream {
                     format!("{}/{}", package_name_for_signature, #struct_name)
                 };
 
-                println!("Class path is: {class_path}");
-
                 let constructor_signature = #constructor_signature.replace(#PKG_NAME, package_name_for_signature.as_str());
 
                 let class = env.find_class(class_path).unwrap();
@@ -249,6 +199,27 @@ pub fn jni_data_class(_attr: TokenStream, input: TokenStream) -> TokenStream {
     };
 
     out.into()
+}
+
+fn generate_field_mapping_into_array(ty: &JniType, param: &TokenStream2) -> TokenStream2 {
+    match ty {
+        JniType::Int32 => {
+            quote! { #param.into() }
+        }
+        JniType::Int64 => {
+            quote! { #param.into() }
+        }
+        JniType::String => {
+            quote! { #param }
+        }
+        JniType::Boolean => {
+            quote! { #param.into() }
+        }
+        JniType::CustomType(_) => {
+            quote! { #param }
+        }
+        JniType::Receiver(_) => panic!("Structs can not have self as type")
+    }
 }
 
 #[proc_macro_attribute]
@@ -279,8 +250,6 @@ pub fn jni_class(_attr: TokenStream, input: TokenStream) -> TokenStream {
     let drop_func_header = format!("Java_{struct_token}Obj_destroy");
     let drop_func_header: TokenStream2 = syn::parse_str(&drop_func_header).unwrap();
 
-    // TODO let constructor = instance_invocation(&rs_struct);
-
     let out = quote! {
         #item_struct
 
@@ -294,8 +263,6 @@ pub fn jni_class(_attr: TokenStream, input: TokenStream) -> TokenStream {
                 } else {
                     format!("{}/{}", package_name_for_signature, #struct_name)
                 };
-
-                println!("Class path is: {class_path}");
 
                 let pointer = Box::into_raw(Box::new(self)) as jni::sys::jlong;
                 let constructor_signature = #constructor_signature.replace(#PKG_NAME, package_name_for_signature.as_str());
@@ -322,18 +289,114 @@ pub fn jni_class(_attr: TokenStream, input: TokenStream) -> TokenStream {
     out.into()
 }
 
-fn instance_invocation(rs_struct: &RsStruct) -> TokenStream2 {
+#[proc_macro_attribute]
+pub fn jni_interface(_attr: TokenStream, input: TokenStream) -> TokenStream {
+    let item_trait = parse_macro_input!(input as ItemTrait);
+    let trait_name = item_trait.ident.to_string();
+    let trait_token = &item_trait.ident;
 
-    todo!()
-    // quote! {
-    //     #[no_mangle]
-    //     pub unsafe extern "system" fn (
-    //         _env: jni::JNIEnv,
-    //         _class: jni::objects::JClass,
-    //     ) -> jni::sys::jlong {
-    //         drop(Box::from_raw(jni_pointer as *mut #struct_token))
-    //     }
-    // }
+    let constructor_types_signature = jni_type_to_jni_method_signature_type(&JniType::Int64);
+    let constructor_signature = format!("({constructor_types_signature})V");
+
+    let rs_struct = RsStruct {
+        name: item_trait.ident.to_string(),
+        fields: vec![], //TODO THIS
+    };
+
+    let functions = item_trait.items.iter().filter_map(|item| {
+        if let TraitItem::Fn(method) = item {
+            let method_name = &method.sig.ident;
+
+            println!("Loading parameters");
+            let parameters = get_parameters_from_method(&method.sig.inputs);
+            println!("Done with parameters, loading return type");
+            let return_type = get_return_type_from_method(&method.sig.output);
+            println!("Done with return type");
+            Some(
+                Function {
+                    owner_name: trait_name.clone(),
+                    name: method_name.to_string(),
+                    parameters,
+                    return_type,
+                }
+            )
+        } else {
+            None
+        }
+    }).collect::<Vec<Function>>();
+
+    let functions_impl = item_trait.items.iter().filter_map(|item| {
+        if let TraitItem::Fn(method) = item {
+            let method_name = &method.sig.ident;
+
+            println!("Loading parameters");
+            let parameters = get_parameters_from_method(&method.sig.inputs);
+            println!("Done with parameters, loading return type");
+            let return_type = get_return_type_from_method(&method.sig.output);
+            println!("Done with return type");
+            Some(
+                Function {
+                    owner_name: trait_name.clone(),
+                    name: method_name.to_string(),
+                    parameters,
+                    return_type,
+                }
+            )
+        } else {
+            None
+        }
+    }).collect::<Vec<Function>>();
+
+    let trait_implementer_name = format!("{trait_name}JniBridge");
+    let trait_implementer_name = syn::parse_str::<TokenStream2>(&trait_implementer_name).unwrap();
+    
+    let out = quote! {
+        #item_trait
+
+        struct #trait_implementer_name<'a> {
+            env: &'a mut jni::JNIEnv<'a>,
+            obj: &'a jni::objects::JObject<'a>,
+        }
+
+        impl #trait_token for #trait_implementer_name {
+
+        }
+    };
+
+    out.into()
+}
+
+fn rust_property_to_jni_type(ty: &JniType, param: &TokenStream2, struct_parameter: &TokenStream2) -> TokenStream2 {
+    match ty {
+        JniType::Int32 => {
+            quote! {
+                let #param = #struct_parameter as jni::sys::jint;
+            }
+        }
+        JniType::Int64 => {
+            quote! {
+                let #param = #struct_parameter as jni::sys::jlong;
+            }
+        }
+        JniType::String => {
+            quote! {
+                let #param: jni::objects::JString = #struct_parameter.into_env(env);
+                let #param: jni::objects::JObject = #param.into();
+                let #param: jni::objects::JValue = jni::objects::JValue::Object(&#param);
+            }
+        }
+        JniType::Boolean => {
+            quote! {
+                let #param = #struct_parameter as jni::sys::jboolean;
+            }
+        }
+        JniType::Receiver(_) | JniType::CustomType(_) => {
+            quote! {
+                let #param: jni::objects::JObject = #struct_parameter.into_env(env);
+                let #param: jni::objects::JValue = jni::objects::JValue::Object(&#param);
+            }
+        }
+    }
 }
 
 fn get_return_type_from_method(return_type: &ReturnType) -> Option<JniType> {
@@ -358,12 +421,6 @@ fn generate_rust_functions(
         let fn_name = &func.name;
         let fn_name_for_jni = string_to_camel_case(fn_name);
 
-        let has_receiver = func.parameters
-            .iter()
-            .any(|param|
-                matches!(param, Parameter::Receiver { .. })
-            );
-
         let obj_suffix = "Obj";
 
         // Generate the new function body with parameter inspection
@@ -375,8 +432,6 @@ fn generate_rust_functions(
         ];
 
         let mut transformations: Vec<TokenStream2> = Vec::new();
-        // let method_call_prefix = String::new(); // TODO we should call the prefix if it's a struct "static" method
-
 
         for param in &func.parameters {
             match param {
@@ -426,8 +481,9 @@ fn generate_rust_functions(
                 }
             })
             .collect();
+        
         let rust_fn_call = quote! { let result = <#fn_owner>::#fn_to_call(#(#rust_fn_call_params,)*); };
-
+        
         let return_signature = match &func.return_type {
             None => { quote! {} }
             Some(ty) => {
@@ -475,45 +531,6 @@ fn generate_rust_functions(
     }).collect()
 }
 
-// fn generate_kotlin_source(file_name: &str, functions: &Vec<Function>) {
-//     let mut kotlin_out = format!("object {file_name} ");
-//     kotlin_out.push('{');
-//     kotlin_out.push('\n');
-//
-//     for func in functions {
-//         kotlin_out.push_str(&format!("external fun {} (\n", func.name));
-//
-//         let kotlin_params_str = generate_kotlin_parameters(&func.parameters);
-//         kotlin_out.push_str(&kotlin_params_str);
-//         kotlin_out.push_str("\n)");
-//
-//         if let Some(rt) = &func.return_type {
-//             let kotlin_type = jni_type_to_kotlin_string(rt);
-//             kotlin_out.push_str(&format!(": {kotlin_type}"));
-//         }
-//
-//         kotlin_out.push('\n');
-//     }
-//
-//     kotlin_out.push_str("\n}");
-//     let mut file = File::create(format!("{OUT_PATH}/{file_name}.kt")).unwrap();
-//     file.write_all(kotlin_out.as_bytes()).unwrap();
-// }
-
-// fn generate_kotlin_parameters(source_parameters: &[Parameter]) -> String {
-//     source_parameters
-//         .iter()
-//         .map(|parameter: &Parameter| {
-//             let name = &parameter.name;
-//             let ty = jni_type_to_kotlin_string(&parameter.ty);
-//
-//             format!("{name}: {ty}")
-//         })
-//         .collect::<Vec<String>>()
-//         .join(",\n")
-// }
-
-
 fn jni_type_to_jni_type(jni_type: &JniType) -> TokenStream2 {
     match jni_type {
         JniType::Int32 => quote! { jni::sys::jint },
@@ -536,105 +553,6 @@ fn jni_type_to_jni_method_signature_type(jni_type: &JniType) -> String {
         }
     }
 }
-
-fn transform_jni_type_to_rust(
-    jni_type: &JniType,
-    param_name: &str,
-) -> TokenStream2 {
-    match jni_type {
-        JniType::Int32 => transform_jint_to_i32(param_name),
-        JniType::Int64 => transform_jint_to_i32(param_name),
-        JniType::String => transform_jstring_to_string(param_name),
-        JniType::Boolean => transform_jbool_to_bool(param_name),
-        JniType::CustomType(_) => transform_jobject_to_custom(param_name),
-        JniType::Receiver(ty) => transform_jlong_to_receiver(param_name, ty),
-    }
-}
-
-fn transform_jlong_to_receiver(param_name: &str, ty: &str) -> TokenStream2 {
-    let param: TokenStream2 = syn::parse_str(param_name).unwrap();
-    let ty: TokenStream2 = syn::parse_str(ty).unwrap();
-
-    quote! {
-        let #param = unsafe { &mut *(#param as *mut #ty) };
-    }
-}
-
-fn transform_rust_to_jni_type(jni_type: &JniType, param_name: &str) -> TokenStream2 {
-    match jni_type {
-        JniType::Int32 => transform_i32_to_jint(param_name),
-        JniType::Int64 => transform_i64_to_jlong(param_name),
-        JniType::String => transform_string_to_jstring(param_name),
-        JniType::Boolean => transform_bool_to_jbool(param_name),
-        JniType::CustomType(_) => transform_custom_to_jobject(param_name),
-        JniType::Receiver(_) => todo!(),
-    }
-}
-
-fn transform_jint_to_i32(param_name: &str) -> TokenStream2 {
-    transform_types(param_name, quote! { i32 })
-}
-
-fn transform_jint_to_i64(param_name: &str) -> TokenStream2 {
-    transform_types(param_name, quote! { i64 })
-}
-
-fn transform_i32_to_jint(param_name: &str) -> TokenStream2 {
-    transform_types(param_name, quote! { jni::sys::jint })
-}
-
-
-fn transform_i64_to_jlong(param_name: &str) -> TokenStream2 {
-    transform_types(param_name, quote! { jni::sys::jlong })
-}
-
-fn transform_bool_to_jbool(param_name: &str) -> TokenStream2 {
-    transform_types(param_name, quote! { jni::sys::jboolean })
-}
-
-fn transform_custom_to_jobject(param_name: &str) -> TokenStream2 {
-    let param = syn::parse_str::<TokenStream2>(param_name).unwrap();
-    quote! { let #param = #param.into_env(&mut env); }
-}
-
-fn transform_jobject_to_custom(param_name: &str) -> TokenStream2 {
-    let param = syn::parse_str::<TokenStream2>(param_name).unwrap();
-    quote! { let #param = #param.into_env(&mut env); }
-}
-
-fn transform_jbool_to_bool(param_name: &str) -> TokenStream2 {
-    let transform = transform_types(param_name, quote! { u8 });
-    let param_name = syn::parse_str::<TokenStream2>(param_name).unwrap();
-    quote! {
-        #transform
-        let #param_name = #param_name == 1;
-    }
-}
-
-fn transform_types(param_name: &str, target_type: TokenStream2) -> TokenStream2 {
-    let param_name = syn::parse_str::<TokenStream2>(param_name).unwrap();
-    quote! { let #param_name = #param_name as #target_type; }
-}
-
-fn transform_jstring_to_string(param_name: &str) -> TokenStream2 {
-    let param_name = syn::parse_str::<TokenStream2>(param_name).unwrap();
-    quote! {
-        let #param_name: String = env
-            .get_string(&#param_name)
-            .expect("Couldn't get java string!")
-            .into();
-    }
-}
-
-fn transform_string_to_jstring(param_name: &str) -> TokenStream2 {
-    let param_name = syn::parse_str::<TokenStream2>(param_name).unwrap();
-    quote! {
-        let #param_name = env
-            .new_string(#param_name)
-            .expect("Couldn't create java string!");
-    }
-}
-
 
 fn get_parameters_from_method(inputs: &Punctuated<FnArg, Comma>) -> Vec<Parameter> {
     inputs

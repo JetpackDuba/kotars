@@ -13,7 +13,7 @@ pub enum Parameter {
 
 #[derive(Serialize, Deserialize)]
 pub struct Function {
-    pub struct_name: String,
+    pub owner_name: String,
     pub name: String,
     pub parameters: Vec<Parameter>,
     pub return_type: Option<JniType>,
