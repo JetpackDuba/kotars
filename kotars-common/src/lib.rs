@@ -1,14 +1,11 @@
+use std::fmt::format;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub enum Parameter {
-    Typed {
-        name: String,
-        ty: JniType,
-    },
-    Receiver {
-        is_mutable: bool,
-    },
+    Typed { name: String, ty: JniType },
+    Receiver { is_mutable: bool },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -33,11 +30,20 @@ pub struct RsStruct {
     pub fields: Vec<Field>,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct RsTrait {
+    pub functions: Vec<Function>,
+}
+
+
+#[derive(Serialize, Deserialize)]
+pub struct RsStructImpl {
+    pub functions: Vec<Function>,
+}
+
 impl RsStruct {
     pub fn all_fields_are_public(&self) -> bool {
-        self.fields
-            .iter()
-            .any(|p| !p.is_public) // any is used because an empty list of fields is permitted
+        self.fields.iter().any(|p| !p.is_public) // any is used because an empty list of fields is permitted
     }
 }
 
@@ -47,6 +53,16 @@ pub struct Field {
     pub name: Option<String>,
     pub ty: JniType,
 }
+
+impl Field {
+    pub fn safe_name(&self, index: &usize) -> String {
+        match &self.name {
+            Some(name) => name.clone(),
+            None => format!("param{index}"),
+        }
+    }
+}
+
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum JniType {
@@ -71,8 +87,7 @@ impl From<String> for JniType {
 }
 
 pub fn string_to_camel_case(text: &str) -> String {
-    text
-        .to_string()
+    text.to_string()
         .split(['_', ' '])
         .enumerate()
         .map(|(index, word)| {

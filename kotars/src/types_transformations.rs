@@ -8,7 +8,7 @@ pub fn transform_jni_type_to_rust(
 ) -> TokenStream2 {
     match jni_type {
         JniType::Int32 => transform_jint_to_i32(param_name),
-        JniType::Int64 => transform_jint_to_i32(param_name),
+        JniType::Int64 => transform_jlong_to_i64(param_name),
         JniType::String => transform_jstring_to_string(param_name),
         JniType::Boolean => transform_jbool_to_bool(param_name),
         JniType::CustomType(_) => transform_jobject_to_custom(param_name),
@@ -40,7 +40,7 @@ fn transform_jint_to_i32(param_name: &str) -> TokenStream2 {
     transform_types(param_name, quote! { i32 })
 }
 
-fn transform_jint_to_i64(param_name: &str) -> TokenStream2 {
+fn transform_jlong_to_i64(param_name: &str) -> TokenStream2 {
     transform_types(param_name, quote! { i64 })
 }
 

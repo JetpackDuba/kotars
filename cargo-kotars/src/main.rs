@@ -62,7 +62,7 @@ fn main() {
                 let range_end = line.len() - 2;
                 let json_line = &line[range_start..range_end].replace('\\', "");
                 println!("{json_line}");
-                let func: Function = serde_json::from_str(json_line).expect(format!("Unable to deserialize function {json_line}").as_str());
+                let func: Function = serde_json::from_str(json_line).unwrap_or_else(|_| panic!("Unable to deserialize function {json_line}"));
                 Some(func)
             } else {
                 None
@@ -77,7 +77,7 @@ fn main() {
                 let range_start = line.find(prefix_to_remove).expect("JNI_CLASS not found.") + prefix_to_remove.len();
                 let range_end = line.len() - 2;
                 let json_line = &line[range_start..range_end].replace('\\', "");
-                let struc: RsStruct = serde_json::from_str(json_line).expect(format!("Unable to deserialize class {json_line}").as_str());
+                let struc: RsStruct = serde_json::from_str(json_line).unwrap_or_else(|_| panic!("Unable to deserialize class {json_line}"));
                 let functions = functions
                     .iter()
                     .filter(|func| func.owner_name == struc.name)
@@ -98,7 +98,7 @@ fn main() {
                 let range_start = line.find(prefix_to_remove).expect("JNI_DATA_CLASS not found.") + prefix_to_remove.len();
                 let range_end = line.len() - 2;
                 let json_line = &line[range_start..range_end].replace('\\', "");
-                let struc: RsStruct = serde_json::from_str(json_line).expect(format!("Unable to deserialize data class {json_line}").as_str());
+                let struc: RsStruct = serde_json::from_str(json_line).unwrap_or_else(|_| panic!("Unable to deserialize data class {json_line}"));
                 Some(struc)
             } else {
                 None
@@ -206,7 +206,7 @@ fn format_function(func: &Function) -> String {
 
     let mut parameters_formatted = format_func_parameters(&func.parameters, true);
     let return_ty = formatted_return_ty(&func.return_type);
-    if !parameters_formatted.is_empty() && !parameters_formatted.ends_with("\n") {
+    if !parameters_formatted.is_empty() && !parameters_formatted.ends_with('\n') {
         parameters_formatted = format!("\n        {parameters_formatted}\n    ");
     };
 
@@ -219,14 +219,14 @@ fn format_function_mapping(func: &Function, is_static: bool) -> String {
 
     let mut parameters_formatted = format_func_parameters(&func.parameters, is_static);
     let return_ty = formatted_return_ty(&func.return_type);
-    if !parameters_formatted.is_empty() && !parameters_formatted.ends_with("\n") {
+    if !parameters_formatted.is_empty() && !parameters_formatted.ends_with('\n') {
         parameters_formatted = format!("\n        {parameters_formatted}\n    ");
     };
 
     let params_as_args = func.parameters.iter()
         .map(|param| {
             match param {
-                Parameter::Typed { name, ty } => name,
+                Parameter::Typed { name, .. } => name,
                 Parameter::Receiver { .. } => "this.pointer"
             }
         })
@@ -299,22 +299,6 @@ fn format_func_parameters(params: &[Parameter],  is_static: bool) -> String {
         .join("\n        ")
 }
 
-fn format_member_func_parameters(params: &[Parameter]) -> String {
-    params.iter()
-        .map(|param| {
-            match param {
-                Parameter::Typed { name, ty } => {
-                    let kotlin_ty = jni_to_kotlin_type(ty);
-                    format!("{name}: {kotlin_ty},")
-                }
-                Parameter::Receiver { .. } => { String::new() }
-            }
-        })
-        .filter(|it| !it.is_empty())
-        .collect::<Vec<String>>()
-        .join("\n        ")
-}
-
 fn jni_to_kotlin_type(ty: &JniType) -> String {
     match ty {
         JniType::Int32 => "Int".to_string(),
@@ -324,15 +308,4 @@ fn jni_to_kotlin_type(ty: &JniType) -> String {
         JniType::CustomType(name) => name.clone(),
         JniType::Receiver(_) => todo!(),
     }
-}
-
-enum KotlinTypes {
-    DataClass {
-        name: String,
-        fields: Vec<Field>,
-    },
-    Class {
-        name: String,
-        functions: Function,
-    },
 }
