@@ -14,7 +14,7 @@ use quote::{quote, ToTokens};
 use syn::__private::{str, TokenStream2};
 use syn::punctuated::Punctuated;
 use syn::token::Comma;
-use syn::{parse_macro_input, FnArg, ImplItem, ItemImpl, ItemStruct, LitStr, ReturnType};
+use syn::{parse_macro_input, FnArg, ImplItem, ItemImpl, ItemStruct, LitStr, ReturnType, ItemTrait, TraitItem};
 
 pub(crate) const AUTO_GENERATED_HEADER_TEXT: &str = "Auto generated header. This will be used by cargo-kotars to generate the Kotlin code that binds to the Rust code.";
 
@@ -151,8 +151,32 @@ pub(crate) fn full_header_comment(content: &str) -> TokenStream2 {
 }
 
 #[proc_macro_attribute]
-pub fn jni_interface(_attr: TokenStream, _input: TokenStream) -> TokenStream {
-    todo!()
+pub fn jni_interface(_attr: TokenStream, input: TokenStream) -> TokenStream {
+    let item_trait = parse_macro_input!(input as ItemTrait);
+    let trait_name = item_trait.ident.to_string();
+    let trait_token = &item_trait.ident;
+
+    let trait_implementer_name = format!("{trait_name}JniBridge");
+    let trait_implementer_name = syn::parse_str::<TokenStream2>(&trait_implementer_name).unwrap();
+
+    let out = quote! {
+        #item_trait
+
+        struct #trait_implementer_name<'a> {
+            env: Rc<RefCell<jni::JNIEnv<'a>>>,
+            callback: Rc<jni::objects::JObject<'a>>,
+        }
+        
+        impl<'a> #trait_token for #trait_implementer_name<'a> {
+            fn hello_world(&mut self, id: i32) {
+                let mut env = self.env.borrow_mut();
+                env.call_method(&self.callback, "helloWorld", "(I)V", &[id.into()])
+                    .unwrap();
+            }
+        }
+    };
+
+    out.into()
 }
 
 fn rust_property_to_jni_type(
@@ -189,6 +213,7 @@ fn rust_property_to_jni_type(
                 let #param: jni::objects::JValue = jni::objects::JValue::Object(&#param);
             }
         }
+        JniType::Interface(_) => todo!()
     }
 }
 

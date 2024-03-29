@@ -72,6 +72,7 @@ pub enum JniType {
     Boolean,
     Receiver(String),
     CustomType(String),
+    Interface(String),
 }
 
 impl From<String> for JniType {
@@ -81,7 +82,18 @@ impl From<String> for JniType {
             "i64" => JniType::Int64,
             "String" => JniType::String,
             "bool" => JniType::Boolean,
-            _ => JniType::CustomType(value.to_string()),
+            _ => {
+                let interface_prefix = "& mut impl ";
+                if value.starts_with(interface_prefix) {
+                    let range_start = interface_prefix.len();
+                    let range_end = value.len();
+                    let interface_name = &value[range_start..range_end];
+                    
+                    JniType::Interface(interface_name.to_string())
+                } else {
+                    JniType::CustomType(value.to_string())
+                }
+            },
         }
     }
 }

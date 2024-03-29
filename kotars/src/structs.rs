@@ -188,7 +188,7 @@ fn jni_type_to_jni_method_signature_type(jni_type: &JniType) -> String {
         JniType::Int64 | JniType::Receiver(_) => "J".to_string(),
         JniType::String => "Ljava/lang/String;".to_string(),
         JniType::Boolean => "Z".to_string(),
-        JniType::CustomType(name) => {
+        JniType::CustomType(name) | JniType::Interface(name) => {
             format!("L{PKG_NAME}/{name};")
         }
     }
@@ -208,7 +208,7 @@ fn generate_field_mapping_into_array(ty: &JniType, param: &TokenStream2) -> Toke
         JniType::Boolean => {
             quote! { #param.into() }
         }
-        JniType::CustomType(_) => {
+        JniType::CustomType(_) | JniType::Interface(_) => {
             quote! { #param }
         }
         JniType::Receiver(_) => panic!("Structs can not have self as type"),

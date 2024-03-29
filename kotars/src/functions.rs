@@ -56,8 +56,14 @@ pub fn generate_rust_functions(
             .iter()
             .map(|param| {
                 match param {
-                    Parameter::Typed { name, ty: _ty } => {
-                        syn::parse_str::<TokenStream2>(name).unwrap()
+                    Parameter::Typed { name, ty } => {
+                        let name = match ty {
+                            JniType::Int32 | JniType::Int64 | JniType::String | JniType::Boolean => { name.clone() }
+                            JniType::Receiver(_) => { todo!() }
+                            JniType::CustomType(_) => { todo!() }
+                            JniType::Interface(_) => { format!("&mut {name}") }
+                        };
+                        syn::parse_str::<TokenStream2>(&name).unwrap()
                     }
                     Parameter::Receiver { is_mutable } => {
                         let mutability_prefix = if *is_mutable {
@@ -97,7 +103,21 @@ pub fn generate_rust_functions(
         let fn_serialized = serde_json::to_string(func).unwrap_or_else(|_| panic!("Serialization of function {fn_name} failed"));
 
         let header_param = format!("JNI_FN_DATA {fn_serialized}");
-        let header_comments =  full_header_comment(header_param.as_str());
+        let header_comments = full_header_comment(header_param.as_str());
+
+        let contains_trait_param = func.parameters
+            .iter()
+            .any(|p| matches!(p, Parameter::Typed { ty: JniType::Interface(_), .. }));
+
+        println!("Func {} has trait parameter = {}", func.name, contains_trait_param);
+
+        let env_ref_cell_for_traits = if contains_trait_param {
+            quote! {
+                let rc_env = Rc::new(RefCell::new(env));
+            }
+        } else {
+            quote! {}
+        };
 
         quote! {
             #header_comments
@@ -105,6 +125,7 @@ pub fn generate_rust_functions(
             pub extern "system" fn #method_name_token_stream<'local>(
                 #(#jni_function_params),*
             ) #return_signature {
+                #env_ref_cell_for_traits
                 #(#transformations)*
                 #rust_fn_call
                 #transform_return
@@ -120,7 +141,7 @@ fn jni_type_to_jni_type(jni_type: &JniType) -> TokenStream2 {
         JniType::Int64 => quote! { jni::sys::jlong },
         JniType::String => quote! { jni::objects::JString<'local> },
         JniType::Boolean => quote! { jni::sys::jboolean },
-        JniType::CustomType(_) => quote! { jni::objects::JObject<'local> },
+        JniType::Interface(_) | JniType::CustomType(_) => quote! { jni::objects::JObject<'local> },
         JniType::Receiver(_) => quote! { jni::sys::jlong },
     }
 }
