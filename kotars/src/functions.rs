@@ -61,6 +61,7 @@ pub fn generate_rust_functions(
                             JniType::Int32 | JniType::Int64 | JniType::String | JniType::Boolean => { name.clone() }
                             JniType::Receiver(_) => { todo!() }
                             JniType::CustomType(_) => { todo!() }
+                            JniType::Void => { todo!() }
                             JniType::Interface(_) => { format!("&mut {name}") }
                         };
                         syn::parse_str::<TokenStream2>(&name).unwrap()
@@ -143,5 +144,6 @@ fn jni_type_to_jni_type(jni_type: &JniType) -> TokenStream2 {
         JniType::Boolean => quote! { jni::sys::jboolean },
         JniType::Interface(_) | JniType::CustomType(_) => quote! { jni::objects::JObject<'local> },
         JniType::Receiver(_) => quote! { jni::sys::jlong },
+        JniType::Void => todo!(),
     }
 }

@@ -1,5 +1,6 @@
 extern crate proc_macro;
 
+use std::fmt::format;
 use kotars_common::{Field, JniType, RsStruct};
 use quote::quote;
 use syn::__private::{str, TokenStream2};
@@ -148,7 +149,7 @@ impl DataClass {
     }
 }
 
-fn generate_struct_fields_transformation(fields: &[Field]) -> Vec<TokenStream2> {
+pub fn generate_struct_fields_transformation(fields: &[Field]) -> Vec<TokenStream2> {
     fields
         .iter()
         .enumerate()
@@ -169,7 +170,28 @@ fn generate_struct_fields_transformation(fields: &[Field]) -> Vec<TokenStream2> 
         .collect::<Vec<TokenStream2>>()
 }
 
-fn generate_struct_fields_mapping_into_array(fields: &[Field]) -> Vec<TokenStream2> {
+pub fn generate_method_fields_transformation(fields: &[Field]) -> Vec<TokenStream2> {
+    fields
+        .iter()
+        .enumerate()
+        .map(|(index, field)| {
+            let name = &field.safe_name(&index);
+            let ty = &field.ty;
+            let param = syn::parse_str(name).unwrap_or_else(|_| panic!("Couldn't parse {name}"));
+
+            let struct_parameter = match field.name.as_ref() {
+                None => panic!("All interface function fields should be named."),
+                Some(_) => {
+                    quote! { #param }
+                }
+            };
+
+            rust_property_to_jni_type(ty, &param, &struct_parameter)
+        })
+        .collect::<Vec<TokenStream2>>()
+}
+
+pub fn generate_struct_fields_mapping_into_array(fields: &[Field]) -> Vec<TokenStream2> {
     fields
         .iter()
         .enumerate()
@@ -182,7 +204,7 @@ fn generate_struct_fields_mapping_into_array(fields: &[Field]) -> Vec<TokenStrea
         .collect::<Vec<TokenStream2>>()
 }
 
-fn jni_type_to_jni_method_signature_type(jni_type: &JniType) -> String {
+pub fn jni_type_to_jni_method_signature_type(jni_type: &JniType) -> String {
     match jni_type {
         JniType::Int32 => "I".to_string(),
         JniType::Int64 | JniType::Receiver(_) => "J".to_string(),
@@ -191,6 +213,7 @@ fn jni_type_to_jni_method_signature_type(jni_type: &JniType) -> String {
         JniType::CustomType(name) | JniType::Interface(name) => {
             format!("L{PKG_NAME}/{name};")
         }
+        JniType::Void => "V".to_string(),
     }
 }
 
@@ -212,6 +235,7 @@ fn generate_field_mapping_into_array(ty: &JniType, param: &TokenStream2) -> Toke
             quote! { #param }
         }
         JniType::Receiver(_) => panic!("Structs can not have self as type"),
+        JniType::Void => panic!("Structs can not have Void as type"),
     }
 }
 

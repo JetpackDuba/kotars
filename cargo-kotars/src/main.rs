@@ -4,7 +4,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use clap::Parser;
-use kotars_common::{Field, Function, JniType, Parameter, RsStruct, string_to_camel_case};
+use kotars_common::{Field, Function, JniType, Parameter, RsInterface, RsStruct, string_to_camel_case};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -90,7 +90,8 @@ fn main() {
         })
         .collect::<Vec<(RsStruct, Vec<&Function>)>>();
 
-    let data_classes = lines
+    let data_classes = lines // todo do not clone
+        .clone()
         .filter_map(|line| {
             if line.contains("JNI_DATA_CLASS") {
                 // let json = line.
@@ -106,6 +107,22 @@ fn main() {
         })
         .collect::<Vec<RsStruct>>();
 
+    let interfaces = lines
+        .filter_map(|line| {
+            if line.contains("JNI_INTERFACE") {
+                // let json = line.
+                let prefix_to_remove = "JNI_INTERFACE ";
+                let range_start = line.find(prefix_to_remove).expect("JNI_INTERFACE not found.") + prefix_to_remove.len();
+                let range_end = line.len() - 2;
+                let json_line = &line[range_start..range_end].replace('\\', "");
+                let struc: RsInterface = serde_json::from_str(json_line).unwrap_or_else(|err| panic!("Unable to deserialize interface {json_line}. {err}"));
+                Some(struc)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<RsInterface>>();
+
     for data_class in data_classes {
         create_data_class(dir, &data_class, package_name.as_str());
     }
@@ -113,7 +130,49 @@ fn main() {
     for (class, functions) in classes {
         create_class(dir, class, package_name.as_str(), functions)
     }
+
+    for interface in interfaces {
+        create_interface(dir, &interface, package_name.as_str())
+    }
     // println!("Abs path of file is: {abs_path:?}");
+}
+
+fn create_interface(dir: &Path, interface: &RsInterface, package_name: &str) {
+    println!("Dir is {dir:?}");
+    let interface_name = &interface.name;
+    let file_name = format!("{interface_name}.kt");
+    let file_path = Path::new(file_name.as_str());
+    let file_path = PathBuf::from(dir).join(file_path);
+
+    let mut file = File::create(file_path).expect("File creation failed");
+
+    let member_functions_mapping_formatted: String = interface.functions.iter()
+        .filter_map(|func| {
+            let has_receiver_parameter = func.parameters
+                .iter()
+                .any(|param| matches!(param, Parameter::Receiver { .. }));
+
+            if has_receiver_parameter {
+                let formatted_function = format_interface_function(func);
+                Some(formatted_function)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<String>>()
+        .join("");
+
+    let content = format!(r#"
+//package {package_name}
+
+interface {interface_name} {{
+
+{member_functions_mapping_formatted}
+}}
+"#);
+
+    file.write_all(content.as_bytes()).expect("Writing Kotlin source code failed");
+    file.flush().unwrap();
 }
 
 fn create_base_files(dir: &Path) {
@@ -240,6 +299,19 @@ fn format_function_mapping(func: &Function, is_static: bool) -> String {
     "#)
 }
 
+fn format_interface_function(func: &Function) -> String {
+    let name = string_to_camel_case(&func.name);
+
+    let mut parameters_formatted = format_func_parameters(&func.parameters, false);
+    let return_ty = formatted_return_ty(&func.return_type);
+
+    if !parameters_formatted.is_empty() && !parameters_formatted.ends_with('\n') {
+        parameters_formatted = format!("\n        {parameters_formatted}\n    ");
+    };
+
+    format!("fun {name}({parameters_formatted}){return_ty}")
+}
+
 fn create_data_class(dir: &Path, rs_struct: &RsStruct, package_name: &str) {
     let class_name = &rs_struct.name;
     let file_name = format!("{class_name}.kt");
@@ -283,7 +355,7 @@ fn formatted_return_ty(return_ty: &Option<JniType>) -> String {
     }
 }
 
-fn format_func_parameters(params: &[Parameter],  is_static: bool) -> String {
+fn format_func_parameters(params: &[Parameter], is_static: bool) -> String {
     params.iter()
         .map(|param| {
             match param {
@@ -291,7 +363,7 @@ fn format_func_parameters(params: &[Parameter],  is_static: bool) -> String {
                     let kotlin_ty = jni_to_kotlin_type(ty);
                     format!("{name}: {kotlin_ty},")
                 }
-                Parameter::Receiver { .. } => { if is_static {"pointer: Long,".to_string()} else { String::new() } }
+                Parameter::Receiver { .. } => { if is_static { "pointer: Long,".to_string() } else { String::new() } }
             }
         })
         .filter(|it| !it.is_empty())
@@ -307,5 +379,7 @@ fn jni_to_kotlin_type(ty: &JniType) -> String {
         JniType::Boolean => "Boolean".to_string(),
         JniType::CustomType(name) => name.clone(),
         JniType::Receiver(_) => todo!(),
+        JniType::Interface(name) => name.clone(),
+        JniType::Void => "Unit".to_string(),
     }
 }

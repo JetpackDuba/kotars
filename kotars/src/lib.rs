@@ -9,12 +9,14 @@ use structs::JniGenerator;
 
 use crate::functions::generate_rust_functions;
 use crate::structs::{Class, DataClass, FromSyn};
-use kotars_common::{Function, JniType, Parameter, RsStruct};
+use kotars_common::{Field, Function, JniType, Parameter, RsInterface, RsStruct, string_to_camel_case};
 use quote::{quote, ToTokens};
+use serde_json::to_string;
 use syn::__private::{str, TokenStream2};
 use syn::punctuated::Punctuated;
 use syn::token::Comma;
 use syn::{parse_macro_input, FnArg, ImplItem, ItemImpl, ItemStruct, LitStr, ReturnType, ItemTrait, TraitItem};
+use syn::Item::Trait;
 
 pub(crate) const AUTO_GENERATED_HEADER_TEXT: &str = "Auto generated header. This will be used by cargo-kotars to generate the Kotlin code that binds to the Rust code.";
 
@@ -143,11 +145,10 @@ pub(crate) fn full_header_comment(content: &str) -> TokenStream2 {
         /// {AUTO_GENERATED_HEADER_TEXT}
         "#
     )
-    .trim_start()
-    .to_string();
+        .trim_start()
+        .to_string();
 
     syn::parse_str(&header_comments).unwrap()
-
 }
 
 #[proc_macro_attribute]
@@ -159,20 +160,135 @@ pub fn jni_interface(_attr: TokenStream, input: TokenStream) -> TokenStream {
     let trait_implementer_name = format!("{trait_name}JniBridge");
     let trait_implementer_name = syn::parse_str::<TokenStream2>(&trait_implementer_name).unwrap();
 
+    let functions = item_trait
+        .items
+        .iter()
+        .filter_map(|item| {
+            if let TraitItem::Fn(func) = item {
+                let method_name = &func.sig.ident;
+                let return_type = &func.sig.output;
+
+                let inputs = &func.sig.inputs;
+                let str_method_name = string_to_camel_case(method_name.to_string().as_str());
+
+                let return_type_signature = match return_type {
+                    ReturnType::Default => { structs::jni_type_to_jni_method_signature_type(&JniType::Void) }
+                    ReturnType::Type(_, ty) => {
+                        let jni_ty = quote::quote!(#ty).to_string().into();
+                        structs::jni_type_to_jni_method_signature_type(&jni_ty)
+                    }
+                };
+                
+                let method_types_signature = &func.sig.inputs.iter()
+                    .filter_map(|field| {
+                        match field {
+                            FnArg::Receiver(_) => {
+                                None
+                            }
+                            FnArg::Typed(pat_ty) => {
+                                let ty = &pat_ty.ty;
+                                let jni_ty = quote::quote!(#ty).to_string().into();
+                                Some(structs::jni_type_to_jni_method_signature_type(&jni_ty))
+                            }
+                        }
+                         
+                    })
+                    .collect::<Vec<String>>()
+                    .join("");
+                
+                let method_types_signature = format!("({method_types_signature}){return_type_signature}");
+                let fields = func
+                    .sig
+                    .inputs
+                    .iter()
+                    .filter_map(|field| {
+                        match field {
+                            FnArg::Receiver(_) => { None }
+                            FnArg::Typed(pat_ty) => {
+                                let pat = &pat_ty.pat;
+                                let name = quote! { #pat }.to_string();
+                                let original_ty = &pat_ty.ty;
+                                let ty = quote! { #original_ty }.to_string();
+                                let jni_ty: JniType = ty.into();
+
+                                let field = Field {
+                                    is_public: true,
+                                    name: Some(name),
+                                    ty: jni_ty,
+                                };
+
+                                Some(field)
+                            }
+                        }
+
+                    })
+                    .collect::<Vec<Field>>();
+
+                let transformations = structs::generate_method_fields_transformation(&fields);
+                let params_into_array = structs::generate_struct_fields_mapping_into_array(&fields);
+
+                let q = quote! {
+                    fn #method_name(#inputs) #return_type {
+                        let mut env = self.env.borrow_mut();
+
+                        #(#transformations)*
+
+                        let method_args: &[jni::objects::JValue] = &[#(#params_into_array,)*]; //vec![s.into()];
+
+                        env.call_method(&self.callback, #str_method_name, #method_types_signature, method_args)
+                            .unwrap();
+                    }
+                };
+
+                Some(q)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<TokenStream2>>();
+
+    let functions_to_serialize =    item_trait
+        .items
+        .iter()
+        .filter_map(|item| {
+            if let TraitItem::Fn(method) = item {
+                let method_name = &method.sig.ident;
+                let parameters = get_parameters_from_method(&method.sig.inputs);
+                let return_type = get_return_type_from_method(&method.sig.output);
+
+                Some(Function {
+                    owner_name: trait_name.clone(),
+                    name: method_name.to_string(),
+                    parameters,
+                    return_type,
+                })
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<Function>>();
+    
+    let interface = RsInterface {
+        name: trait_name,
+        functions: functions_to_serialize,
+    };
+
+    let interface_json = serde_json::to_string(&interface).unwrap();
+
+    let header_param = format!("JNI_INTERFACE {interface_json}");
+    let header_comments = full_header_comment(header_param.as_str());
+    
     let out = quote! {
+        #header_comments
         #item_trait
 
         struct #trait_implementer_name<'a> {
-            env: Rc<RefCell<jni::JNIEnv<'a>>>,
-            callback: Rc<jni::objects::JObject<'a>>,
+            env: std::rc::Rc<std::cell::RefCell<jni::JNIEnv<'a>>>,
+            callback: std::rc::Rc<jni::objects::JObject<'a>>,
         }
         
         impl<'a> #trait_token for #trait_implementer_name<'a> {
-            fn hello_world(&mut self, id: i32) {
-                let mut env = self.env.borrow_mut();
-                env.call_method(&self.callback, "helloWorld", "(I)V", &[id.into()])
-                    .unwrap();
-            }
+            #(#functions)*
         }
     };
 
@@ -213,7 +329,8 @@ fn rust_property_to_jni_type(
                 let #param: jni::objects::JValue = jni::objects::JValue::Object(&#param);
             }
         }
-        JniType::Interface(_) => todo!()
+        JniType::Interface(_) => todo!(),
+        JniType::Void => todo!(),
     }
 }
 

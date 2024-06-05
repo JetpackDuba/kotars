@@ -14,6 +14,7 @@ pub fn transform_jni_type_to_rust(
         JniType::Boolean => transform_jbool_to_bool(param_name),
         JniType::CustomType(_) => transform_jobject_to_custom(param_name),
         JniType::Receiver(ty) => transform_jlong_to_receiver(param_name, ty),
+        JniType::Void => panic!("Void can't be transformed to a Rust type"),
         JniType::Interface(name) => {
             let struct_name = format!("{name}JniBridge");
             let struct_name: TokenStream2 = syn::parse_str(&struct_name).unwrap();
@@ -51,6 +52,7 @@ pub fn transform_rust_to_jni_type(jni_type: &JniType, param_name: &str) -> Token
         JniType::CustomType(_) => transform_custom_to_jobject(param_name),
         JniType::Receiver(_) => todo!(),
         JniType::Interface(_) => panic!("Transformation from Rust traits to interfaces is not supported"),
+        JniType::Void => panic!("Void type can't be transformed"),
     }
 }
 

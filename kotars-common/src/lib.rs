@@ -31,6 +31,12 @@ pub struct RsStruct {
 }
 
 #[derive(Serialize, Deserialize)]
+pub struct RsInterface {
+    pub name: String,
+    pub functions: Vec<Function>,
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct RsTrait {
     pub functions: Vec<Function>,
 }
@@ -73,6 +79,7 @@ pub enum JniType {
     Receiver(String),
     CustomType(String),
     Interface(String),
+    Void,
 }
 
 impl From<String> for JniType {
@@ -83,7 +90,9 @@ impl From<String> for JniType {
             "String" => JniType::String,
             "bool" => JniType::Boolean,
             _ => {
-                let interface_prefix = "& mut impl ";
+                println!("value is {value}");
+                
+                let interface_prefix = "& impl ";
                 if value.starts_with(interface_prefix) {
                     let range_start = interface_prefix.len();
                     let range_end = value.len();
