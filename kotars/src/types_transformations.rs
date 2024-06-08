@@ -15,6 +15,16 @@ pub fn transform_jni_type_to_rust(
         JniType::CustomType(_) => transform_jobject_to_custom(param_name),
         JniType::Receiver(ty) => transform_jlong_to_receiver(param_name, ty),
         JniType::Void => panic!("Void can't be transformed to a Rust type"),
+        JniType::Option(ty) => {
+            let transform = transform_jni_type_to_rust(ty, param_name);
+
+            quote! {
+                let is_null = {
+                    let mut env = rc_env.borrow_mut();
+                    env.is_same_object
+                };
+            }
+        },
         JniType::Interface(name) => {
             let struct_name = format!("{name}JniBridge");
             let struct_name: TokenStream2 = syn::parse_str(&struct_name).unwrap();
@@ -51,6 +61,7 @@ pub fn transform_rust_to_jni_type(jni_type: &JniType, param_name: &str) -> Token
         JniType::Boolean => transform_bool_to_jbool(param_name),
         JniType::CustomType(_) => transform_custom_to_jobject(param_name),
         JniType::Receiver(_) => todo!(),
+        JniType::Option(ty) => transform_rust_to_jni_type(ty, param_name),
         JniType::Interface(_) => panic!("Transformation from Rust traits to interfaces is not supported"),
         JniType::Void => panic!("Void type can't be transformed"),
     }
@@ -79,12 +90,23 @@ fn transform_bool_to_jbool(param_name: &str) -> TokenStream2 {
 
 fn transform_custom_to_jobject(param_name: &str) -> TokenStream2 {
     let param = syn::parse_str::<TokenStream2>(param_name).unwrap();
-    quote! { let #param = #param.into_env(&mut env); }
+    quote! {
+        
+        let #param = {
+            let mut env = rc_env.borrow_mut();
+            #param.into_env(&mut env)
+        }; 
+    }
 }
 
 fn transform_jobject_to_custom(param_name: &str) -> TokenStream2 {
     let param = syn::parse_str::<TokenStream2>(param_name).unwrap();
-    quote! { let #param = #param.into_env(&mut env); }
+    quote! { 
+        let #param = {
+            let mut env = rc_env.borrow_mut();
+            #param.into_env(&mut env)
+        }; 
+    }
 }
 
 fn transform_jbool_to_bool(param_name: &str) -> TokenStream2 {
@@ -104,10 +126,15 @@ fn transform_types(param_name: &str, target_type: TokenStream2) -> TokenStream2 
 fn transform_jstring_to_string(param_name: &str) -> TokenStream2 {
     let param_name = syn::parse_str::<TokenStream2>(param_name).unwrap();
     quote! {
-        let #param_name: String = env
+        
+        let #param_name: String = {
+            let mut env = rc_env.borrow_mut();
+            
+            env
             .get_string(&#param_name)
             .expect("Couldn't get java string!")
-            .into();
+            .into()
+        };
     }
 }
 

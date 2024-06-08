@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 jni = "0.21.1"
 kotars = { path= "../kotars" }
+notify = "6.1.1"

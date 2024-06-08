@@ -57,13 +57,7 @@ pub fn generate_rust_functions(
             .map(|param| {
                 match param {
                     Parameter::Typed { name, ty } => {
-                        let name = match ty {
-                            JniType::Int32 | JniType::Int64 | JniType::String | JniType::Boolean => { name.clone() }
-                            JniType::Receiver(_) => { todo!() }
-                            JniType::CustomType(_) => { todo!() }
-                            JniType::Void => { todo!() }
-                            JniType::Interface(_) => { format!("&mut {name}") }
-                        };
+                        let name = rust_fn_call_from_jni_type(ty, name);
                         syn::parse_str::<TokenStream2>(&name).unwrap()
                     }
                     Parameter::Receiver { is_mutable } => {
@@ -110,15 +104,7 @@ pub fn generate_rust_functions(
             .iter()
             .any(|p| matches!(p, Parameter::Typed { ty: JniType::Interface(_), .. }));
 
-        println!("Func {} has trait parameter = {}", func.name, contains_trait_param);
-
-        let env_ref_cell_for_traits = if contains_trait_param {
-            quote! {
-                let rc_env = Rc::new(RefCell::new(env));
-            }
-        } else {
-            quote! {}
-        };
+        println!("!Func {} has trait parameter = {}", func.name, contains_trait_param);
 
         quote! {
             #header_comments
@@ -126,14 +112,27 @@ pub fn generate_rust_functions(
             pub extern "system" fn #method_name_token_stream<'local>(
                 #(#jni_function_params),*
             ) #return_signature {
-                #env_ref_cell_for_traits
+                let rc_env = std::rc::Rc::new(std::cell::RefCell::new(env));
+
                 #(#transformations)*
+                
                 #rust_fn_call
                 #transform_return
                 #return_statement
             }
         }
     }).collect()
+}
+
+fn rust_fn_call_from_jni_type(jni_type: &JniType, name: &String) -> String {
+    match jni_type {
+        JniType::Int32 | JniType::Int64 | JniType::String | JniType::Boolean => { name.clone() }
+        JniType::Receiver(_) => { todo!() }
+        JniType::CustomType(_) => { todo!() }
+        JniType::Void => { todo!() }
+        JniType::Option(ty) => { rust_fn_call_from_jni_type(ty, name) }
+        JniType::Interface(_) => { format!("&mut {name}") }
+    }
 }
 
 fn jni_type_to_jni_type(jni_type: &JniType) -> TokenStream2 {
@@ -145,5 +144,6 @@ fn jni_type_to_jni_type(jni_type: &JniType) -> TokenStream2 {
         JniType::Interface(_) | JniType::CustomType(_) => quote! { jni::objects::JObject<'local> },
         JniType::Receiver(_) => quote! { jni::sys::jlong },
         JniType::Void => todo!(),
+        JniType::Option(ty) => jni_type_to_jni_type(ty),
     }
 }

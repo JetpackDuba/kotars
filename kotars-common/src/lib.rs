@@ -79,6 +79,7 @@ pub enum JniType {
     Receiver(String),
     CustomType(String),
     Interface(String),
+    Option(Box<JniType>),
     Void,
 }
 

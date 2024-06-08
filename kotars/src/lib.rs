@@ -1,22 +1,22 @@
-mod functions;
-mod structs;
-mod types_transformations;
-
 extern crate proc_macro;
 
 use proc_macro::TokenStream;
+
+use quote::{quote, ToTokens};
+use syn::{FnArg, ImplItem, ItemImpl, ItemStruct, ItemTrait, LitStr, parse_macro_input, ReturnType, TraitItem};
+use syn::__private::{str, TokenStream2};
+use syn::punctuated::Punctuated;
+use syn::token::Comma;
+
+use kotars_common::{Field, Function, JniType, Parameter, RsInterface, RsStruct, string_to_camel_case};
 use structs::JniGenerator;
 
 use crate::functions::generate_rust_functions;
 use crate::structs::{Class, DataClass, FromSyn};
-use kotars_common::{Field, Function, JniType, Parameter, RsInterface, RsStruct, string_to_camel_case};
-use quote::{quote, ToTokens};
-use serde_json::to_string;
-use syn::__private::{str, TokenStream2};
-use syn::punctuated::Punctuated;
-use syn::token::Comma;
-use syn::{parse_macro_input, FnArg, ImplItem, ItemImpl, ItemStruct, LitStr, ReturnType, ItemTrait, TraitItem};
-use syn::Item::Trait;
+
+mod functions;
+mod structs;
+mod types_transformations;
 
 pub(crate) const AUTO_GENERATED_HEADER_TEXT: &str = "Auto generated header. This will be used by cargo-kotars to generate the Kotlin code that binds to the Rust code.";
 
@@ -32,11 +32,11 @@ pub fn jni_init(input: TokenStream) -> TokenStream {
         pub const JNI_PACKAGE_NAME: &str = #package_name;
 
         trait IntoEnv<'a, T> {
-            fn into_env(self, env: &mut jni::JNIEnv<'a>) -> T;
+            fn into_env(self, env: &mut std::cell::RefMut<'_, jni::JNIEnv<'a>>) -> T;
         }
 
         impl <'local> IntoEnv<'local, jni::objects::JString<'local>> for String {
-            fn into_env(self, env: &mut jni::JNIEnv<'local>) -> jni::objects::JString<'local> {
+            fn into_env(self, env: &mut std::cell::RefMut<'_, jni::JNIEnv<'local>>) -> jni::objects::JString<'local> {
                 env
                     .new_string(self)
                     .expect("Couldn't create java string!")
@@ -44,7 +44,7 @@ pub fn jni_init(input: TokenStream) -> TokenStream {
         }
 
         impl IntoEnv<'_, String> for jni::objects::JString<'_> {
-            fn into_env(self, env: &mut jni::JNIEnv) -> String {
+            fn into_env(self, env: &mut std::cell::RefMut<'_, jni::JNIEnv>) -> String {
                 env
                     .get_string(&self)
                     .expect("Couldn't get java string!")
@@ -53,12 +53,12 @@ pub fn jni_init(input: TokenStream) -> TokenStream {
         }
 
         impl IntoEnv<'_, Vec<u8>> for jni::objects::JByteArray<'_> {
-            fn into_env(self, env: &mut jni::JNIEnv) -> Vec<u8> {
+            fn into_env(self, env: &mut std::cell::RefMut<'_, jni::JNIEnv>) -> Vec<u8> {
                 env.convert_byte_array(self).unwrap()
             }
         }
         impl <'local> IntoEnv<'local, jni::objects::JByteArray<'local>> for Vec<u8> {
-            fn into_env(self, env: &mut jni::JNIEnv<'local>) -> jni::objects::JByteArray<'local> {
+            fn into_env(self, env: &mut std::cell::RefMut<'_, jni::JNIEnv<'local>>) -> jni::objects::JByteArray<'local> {
                 let output = env.byte_array_from_slice(&self).unwrap();
                 output
             }
@@ -178,7 +178,7 @@ pub fn jni_interface(_attr: TokenStream, input: TokenStream) -> TokenStream {
                         structs::jni_type_to_jni_method_signature_type(&jni_ty)
                     }
                 };
-                
+
                 let method_types_signature = &func.sig.inputs.iter()
                     .filter_map(|field| {
                         match field {
@@ -191,11 +191,10 @@ pub fn jni_interface(_attr: TokenStream, input: TokenStream) -> TokenStream {
                                 Some(structs::jni_type_to_jni_method_signature_type(&jni_ty))
                             }
                         }
-                         
                     })
                     .collect::<Vec<String>>()
                     .join("");
-                
+
                 let method_types_signature = format!("({method_types_signature}){return_type_signature}");
                 let fields = func
                     .sig
@@ -220,7 +219,6 @@ pub fn jni_interface(_attr: TokenStream, input: TokenStream) -> TokenStream {
                                 Some(field)
                             }
                         }
-
                     })
                     .collect::<Vec<Field>>();
 
@@ -229,14 +227,17 @@ pub fn jni_interface(_attr: TokenStream, input: TokenStream) -> TokenStream {
 
                 let q = quote! {
                     fn #method_name(#inputs) #return_type {
-                        let mut env = self.env.borrow_mut();
+                        let rc_env = &self.env;
 
                         #(#transformations)*
 
                         let method_args: &[jni::objects::JValue] = &[#(#params_into_array,)*]; //vec![s.into()];
 
-                        env.call_method(&self.callback, #str_method_name, #method_types_signature, method_args)
-                            .unwrap();
+
+                        let result = {
+                            let mut env = rc_env.borrow_mut();
+                            env.call_method(&self.callback, #str_method_name, #method_types_signature, method_args).unwrap_or_else(|e| panic!("Call method failed with error: {e}!!"))
+                        };
                     }
                 };
 
@@ -247,7 +248,7 @@ pub fn jni_interface(_attr: TokenStream, input: TokenStream) -> TokenStream {
         })
         .collect::<Vec<TokenStream2>>();
 
-    let functions_to_serialize =    item_trait
+    let functions_to_serialize = item_trait
         .items
         .iter()
         .filter_map(|item| {
@@ -267,7 +268,7 @@ pub fn jni_interface(_attr: TokenStream, input: TokenStream) -> TokenStream {
             }
         })
         .collect::<Vec<Function>>();
-    
+
     let interface = RsInterface {
         name: trait_name,
         functions: functions_to_serialize,
@@ -277,7 +278,7 @@ pub fn jni_interface(_attr: TokenStream, input: TokenStream) -> TokenStream {
 
     let header_param = format!("JNI_INTERFACE {interface_json}");
     let header_comments = full_header_comment(header_param.as_str());
-    
+
     let out = quote! {
         #header_comments
         #item_trait
@@ -313,7 +314,10 @@ fn rust_property_to_jni_type(
         }
         JniType::String => {
             quote! {
-                let #param: jni::objects::JString = #struct_parameter.into_env(env);
+                let #param: jni::objects::JString = {
+                    let mut env = rc_env.borrow_mut();
+                    #struct_parameter.into_env(&mut env)
+                };
                 let #param: jni::objects::JObject = #param.into();
                 let #param: jni::objects::JValue = jni::objects::JValue::Object(&#param);
             }
@@ -325,12 +329,16 @@ fn rust_property_to_jni_type(
         }
         JniType::Receiver(_) | JniType::CustomType(_) => {
             quote! {
-                let #param: jni::objects::JObject = #struct_parameter.into_env(env);
+                let #param: jni::objects::JObject = {
+                    let mut env = rc_env.borrow_mut();
+                    #struct_parameter.into_env(&mut env)
+                };
                 let #param: jni::objects::JValue = jni::objects::JValue::Object(&#param);
             }
         }
         JniType::Interface(_) => todo!(),
         JniType::Void => todo!(),
+        JniType::Option(_) => todo!(),
     }
 }
 

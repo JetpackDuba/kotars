@@ -62,7 +62,7 @@ impl Class {
         quote! {
             #header_comments
             impl <'local> crate::IntoEnv<'local, jni::objects::JObject<'local>> for #struct_token {
-                fn into_env(self, env: &mut jni::JNIEnv<'local>) -> jni::objects::JObject<'local> {
+                fn into_env(self, env: &mut std::cell::RefMut<'_, jni::JNIEnv<'local>>) -> jni::objects::JObject<'local> {
                     let package_name_for_signature = crate::JNI_PACKAGE_NAME.replace(".", "/");
 
                     let class_path = if package_name_for_signature.is_empty() {
@@ -72,9 +72,10 @@ impl Class {
                     };
 
                     let pointer = Box::into_raw(Box::new(self)) as jni::sys::jlong;
-                    let constructor_signature = #constructor_signature.replace(#PKG_NAME, package_name_for_signature.as_str());
+                    let constructor_signature = #constructor_signature.replace("<PKG_NAME>/", package_name_for_signature.as_str());
 
-                    let class = env.find_class(class_path).expect("Find class failed");
+                    let error_msg = format!("Find class failed for {class_path}");
+                    let class = env.find_class(class_path).expect(error_msg.as_str());
 
                     let constructor_args: &[jni::objects::JValue] = &[pointer.into()]; //vec![s.into()];
                     let obj = env.new_object(class, constructor_signature.as_str(), constructor_args).expect("New object failed");
@@ -126,9 +127,10 @@ impl DataClass {
         quote! {
             #header_comments
             impl <'local> crate::IntoEnv<'local, jni::objects::JObject<'local>> for #struct_token {
-                fn into_env(self, env: &mut jni::JNIEnv<'local>) -> jni::objects::JObject<'local> {
+                fn into_env(self, env: &mut std::cell::RefMut<'_, jni::JNIEnv<'local>>) -> jni::objects::JObject<'local> {
                     let package_name_for_signature = crate::JNI_PACKAGE_NAME.replace(".", "/");
-
+                    let rc_env = std::rc::Rc::new(std::cell::RefCell::new(env));
+                    
                     let class_path = if package_name_for_signature.is_empty() {
                         format!("{}", #struct_name)
                     } else {
@@ -137,11 +139,20 @@ impl DataClass {
 
                     let constructor_signature = #constructor_signature.replace(#PKG_NAME, package_name_for_signature.as_str());
 
-                    let class = env.find_class(class_path).unwrap();
+                    let class = {
+                        let mut env = rc_env.borrow_mut();
+                        env.find_class(class_path).unwrap()
+                    };
+                    
                     #(#transformations)*
 
                     let constructor_args: &[jni::objects::JValue] = &[#(#params_into_array,)*]; //vec![s.into()];
-                    let obj = env.new_object(class, constructor_signature.as_str(), constructor_args).unwrap();
+                    
+                    let obj = {
+                        let mut env = rc_env.borrow_mut();
+                        env.new_object(class, constructor_signature.as_str(), constructor_args).unwrap()
+                    };
+                    
                     obj
                 }
             }
@@ -211,9 +222,11 @@ pub fn jni_type_to_jni_method_signature_type(jni_type: &JniType) -> String {
         JniType::String => "Ljava/lang/String;".to_string(),
         JniType::Boolean => "Z".to_string(),
         JniType::CustomType(name) | JniType::Interface(name) => {
-            format!("L{PKG_NAME}/{name};")
+            // TODO At some point restore supporting package names format!("L{PKG_NAME}/{name};")
+            format!("L{name};")
         }
         JniType::Void => "V".to_string(),
+        JniType::Option(ty) => jni_type_to_jni_method_signature_type(ty),
     }
 }
 
@@ -236,6 +249,7 @@ fn generate_field_mapping_into_array(ty: &JniType, param: &TokenStream2) -> Toke
         }
         JniType::Receiver(_) => panic!("Structs can not have self as type"),
         JniType::Void => panic!("Structs can not have Void as type"),
+        JniType::Option(ty) => generate_field_mapping_into_array(ty, param),
     }
 }
 
