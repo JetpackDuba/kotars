@@ -4,7 +4,12 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub enum Parameter {
-    Typed { name: String, ty: JniType },
+    Typed {
+        name: String,
+        ty: JniType,
+        is_borrow: bool,
+        is_mutable: bool,
+    }, // TODO replace field with single type tuple
     Receiver { is_mutable: bool },
 }
 
@@ -74,12 +79,15 @@ impl Field {
 pub enum JniType {
     Int32,
     Int64,
+    UInt64,
     String,
     Boolean,
     Receiver(String),
     CustomType(String),
     Interface(String),
     Option(Box<JniType>),
+    ByteArray,
+    // Vec(Box<JniType>),
     Void,
 }
 
@@ -88,22 +96,35 @@ impl From<String> for JniType {
         match value.as_str() {
             "i32" => JniType::Int32,
             "i64" => JniType::Int64,
+            "u64" => JniType::UInt64,
             "String" => JniType::String,
             "bool" => JniType::Boolean,
             _ => {
                 println!("value is {value}");
-                
-                let interface_prefix = "& impl ";
-                if value.starts_with(interface_prefix) {
+
+                let interface_prefix = "impl ";
+                let option_prefix = "Option";
+                let value_without_spaces = value.replace(' ', "");
+                println!("value_without_spaces is {value_without_spaces}");
+
+                if value_without_spaces == "Vec<u8>" {
+                    JniType::ByteArray
+                } else if value.starts_with(option_prefix) {
+                    println!("Starts with option {value}");
+
+                    let ty = value.strip_prefix("Option < ").expect("Removing option prefix failed").strip_suffix(" >").expect("Removing option suffix failed");
+
+                    JniType::Option(Box::new(JniType::from(ty.to_string())))
+                } else if value.starts_with(interface_prefix) {
                     let range_start = interface_prefix.len();
                     let range_end = value.len();
                     let interface_name = &value[range_start..range_end];
-                    
+
                     JniType::Interface(interface_name.to_string())
                 } else {
                     JniType::CustomType(value.to_string())
                 }
-            },
+            }
         }
     }
 }

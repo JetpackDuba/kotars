@@ -11,7 +11,7 @@ use syn::token::Comma;
 use kotars_common::{Field, Function, JniType, Parameter, RsInterface, RsStruct, string_to_camel_case};
 use structs::JniGenerator;
 
-use crate::functions::generate_rust_functions;
+use crate::functions::generate_rust_jni_binding_functions;
 use crate::structs::{Class, DataClass, FromSyn};
 
 mod functions;
@@ -94,7 +94,7 @@ pub fn jni_struct_impl(_attr: TokenStream, item: TokenStream) -> TokenStream {
         })
         .collect::<Vec<Function>>();
 
-    let new_functions = generate_rust_functions(&struct_name, &functions);
+    let new_functions = generate_rust_jni_binding_functions(&struct_name, &functions);
 
     let output = quote! {
         #input_impl
@@ -312,6 +312,11 @@ fn rust_property_to_jni_type(
                 let #param = #struct_parameter as jni::sys::jlong;
             }
         }
+        JniType::UInt64 => {
+            quote! {
+                let #param = #struct_parameter as jni::sys::jlong; // TODO This should be unsigned, perhaps use an object?
+            }
+        }
         JniType::String => {
             quote! {
                 let #param: jni::objects::JString = {
@@ -327,6 +332,15 @@ fn rust_property_to_jni_type(
                 let #param = #struct_parameter as jni::sys::jboolean;
             }
         }
+        JniType::ByteArray => {
+            quote! {
+                let #param: jni::objects::JByteArray = {
+                    let mut env = rc_env.borrow_mut();
+                    #struct_parameter.into_env(&mut env)
+                };
+                let #param: jni::objects::JValue = jni::objects::JValue::Object(&#param);
+            }
+        }
         JniType::Receiver(_) | JniType::CustomType(_) => {
             quote! {
                 let #param: jni::objects::JObject = {
@@ -338,7 +352,11 @@ fn rust_property_to_jni_type(
         }
         JniType::Interface(_) => todo!(),
         JniType::Void => todo!(),
-        JniType::Option(_) => todo!(),
+        JniType::Option(ty) => {
+            quote! {
+                env.is_same_object(&callback, JObject::null());
+            }
+        },
     }
 }
 
@@ -371,10 +389,21 @@ fn get_parameters_from_method(inputs: &Punctuated<FnArg, Comma>) -> Vec<Paramete
                 FnArg::Typed(pat_type) => {
                     let pat = &pat_type.pat;
                     let ty = &pat_type.ty;
-
+                    let ty = quote! {#ty}.to_string();
+                    let ty_name = ty
+                        .replace('&', "")
+                        .replace("mut", "")
+                        .trim()
+                        .to_string();
+                    
+                    let is_borrow = ty.contains('&');
+                    let is_mutable = ty.contains("mut");
+                    
                     Parameter::Typed {
                         name: quote! {#pat}.to_string(),
-                        ty: quote! {#ty}.to_string().into(),
+                        ty: ty_name.into(),
+                        is_borrow,
+                        is_mutable,
                     }
                 }
             }

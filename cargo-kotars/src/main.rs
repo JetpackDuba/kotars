@@ -326,8 +326,8 @@ fn create_data_class(dir: &Path, rs_struct: &RsStruct, package_name: &str) {
         .enumerate()
         .map(|(index, field)| {
             let alternative_name = format!("param{index}");
-            let field_name = field.name.as_ref().unwrap_or(&alternative_name);
-            let ty = jni_to_kotlin_type(&field.ty);
+            let field_name = string_to_camel_case(field.name.as_ref().unwrap_or(&alternative_name));
+            let ty = jni_to_kotlin_type(&field.ty, false);
             format!("val {field_name}: {ty},")
         })
         .collect::<Vec<String>>()
@@ -349,7 +349,7 @@ fn formatted_return_ty(return_ty: &Option<JniType>) -> String {
     match return_ty.as_ref() {
         None => { String::new() }
         Some(ty) => {
-            let ty = jni_to_kotlin_type(ty);
+            let ty = jni_to_kotlin_type(ty, false);
             format!(": {ty}")
         }
     }
@@ -359,8 +359,8 @@ fn format_func_parameters(params: &[Parameter], is_static: bool) -> String {
     params.iter()
         .map(|param| {
             match param {
-                Parameter::Typed { name, ty } => {
-                    let kotlin_ty = jni_to_kotlin_type(ty);
+                Parameter::Typed { name, ty, is_borrow, is_mutable } => {
+                    let kotlin_ty = jni_to_kotlin_type(ty, false);
                     format!("{name}: {kotlin_ty},")
                 }
                 Parameter::Receiver { .. } => { if is_static { "pointer: Long,".to_string() } else { String::new() } }
@@ -371,15 +371,28 @@ fn format_func_parameters(params: &[Parameter], is_static: bool) -> String {
         .join("\n        ")
 }
 
-fn jni_to_kotlin_type(ty: &JniType) -> String {
-    match ty {
+fn jni_to_kotlin_type(ty: &JniType, is_nullable: bool) -> String {
+    let ty = match ty {
         JniType::Int32 => "Int".to_string(),
         JniType::Int64 => "Long".to_string(),
+        JniType::UInt64 => "Long".to_string(), // TODO This should be unsigned, perhaps use an object?
         JniType::String => "String".to_string(),
         JniType::Boolean => "Boolean".to_string(),
+        JniType::ByteArray => "ByteArray".to_string(),
         JniType::CustomType(name) => name.clone(),
         JniType::Receiver(_) => todo!(),
         JniType::Interface(name) => name.clone(),
         JniType::Void => "Unit".to_string(),
+        JniType::Option(ty) => jni_to_kotlin_type(ty, true),
+        // JniType::Vec(ty) => {
+        //     let ty_name = jni_to_kotlin_type(ty, true);
+        //     format!("Array<{ty_name}>")
+        // },
+    };
+
+    if is_nullable {
+        format!("{ty}?")
+    } else {
+        ty
     }
 }

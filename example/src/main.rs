@@ -53,6 +53,10 @@ impl FileWatcher {
         println!("Starting to watch directory {path}");
         watch_directory(path, git_dir_path, notifier);
     }
+    
+    fn test(file_changed: &mut FileChanged) {
+        
+    }
 
     fn new() -> FileWatcher {
         FileWatcher {

@@ -219,8 +219,10 @@ pub fn jni_type_to_jni_method_signature_type(jni_type: &JniType) -> String {
     match jni_type {
         JniType::Int32 => "I".to_string(),
         JniType::Int64 | JniType::Receiver(_) => "J".to_string(),
+        JniType::UInt64 => "J".to_string(), // TODO This should be unsigned, perhaps use an object?
         JniType::String => "Ljava/lang/String;".to_string(),
         JniType::Boolean => "Z".to_string(),
+        JniType::ByteArray => "[B".to_string(),
         JniType::CustomType(name) | JniType::Interface(name) => {
             // TODO At some point restore supporting package names format!("L{PKG_NAME}/{name};")
             format!("L{name};")
@@ -232,19 +234,13 @@ pub fn jni_type_to_jni_method_signature_type(jni_type: &JniType) -> String {
 
 fn generate_field_mapping_into_array(ty: &JniType, param: &TokenStream2) -> TokenStream2 {
     match ty {
-        JniType::Int32 => {
+        JniType::Int32 | JniType::Int64 | JniType::Boolean=> {
             quote! { #param.into() }
         }
-        JniType::Int64 => {
-            quote! { #param.into() }
+        JniType::UInt64 => {
+            quote! { #param.into() } // TODO This should be unsigned, perhaps use an object?
         }
-        JniType::String => {
-            quote! { #param }
-        }
-        JniType::Boolean => {
-            quote! { #param.into() }
-        }
-        JniType::CustomType(_) | JniType::Interface(_) => {
+        JniType::CustomType(_) | JniType::Interface(_) | JniType::ByteArray | JniType::String => {
             quote! { #param }
         }
         JniType::Receiver(_) => panic!("Structs can not have self as type"),
@@ -268,6 +264,13 @@ impl FromSyn for RsStruct {
                 let ty = quote! { #original_ty }.to_string();
                 let jni_ty: JniType = ty.into();
 
+                let nameD = match name.clone() {
+                    None => { "undefined".to_string() }
+                    Some(b) => { b }
+                };
+                
+                println!("Field {nameD} is type {jni_ty:#?}");
+                
                 Field {
                     is_public: matches!(field.vis, Visibility::Public { .. }),
                     name,
