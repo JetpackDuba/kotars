@@ -263,13 +263,6 @@ impl FromSyn for RsStruct {
                 let original_ty = &field.ty;
                 let ty = quote! { #original_ty }.to_string();
                 let jni_ty: JniType = ty.into();
-
-                let nameD = match name.clone() {
-                    None => { "undefined".to_string() }
-                    Some(b) => { b }
-                };
-                
-                println!("Field {nameD} is type {jni_ty:#?}");
                 
                 Field {
                     is_public: matches!(field.vis, Visibility::Public { .. }),

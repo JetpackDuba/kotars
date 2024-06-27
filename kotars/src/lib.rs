@@ -353,9 +353,11 @@ fn rust_property_to_jni_type(
         JniType::Interface(_) => todo!(),
         JniType::Void => todo!(),
         JniType::Option(ty) => {
-            quote! {
-                env.is_same_object(&callback, JObject::null());
-            }
+            
+            todo!()
+            // quote! {
+            //     env.is_same_object(&callback, JObject::null());
+            // }
         },
     }
 }

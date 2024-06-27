@@ -5,9 +5,10 @@ use kotars_common::JniType;
 pub fn transform_jni_type_to_rust(
     jni_type: &JniType,
     param_name: &str,
+    is_optional: bool,
 ) -> TokenStream2 {
     match jni_type {
-        JniType::Int32 => transform_jint_to_i32(param_name),
+        JniType::Int32 => transform_jint_to_i32(param_name, is_optional),
         JniType::Int64 => transform_jlong_to_i64(param_name),
         JniType::UInt64 => transform_jlong_to_u64(param_name), // TODO This should be unsigned, perhaps use an object?
         JniType::String => transform_jstring_to_string(param_name),
@@ -26,20 +27,30 @@ pub fn transform_jni_type_to_rust(
         JniType::Void => panic!("Void can't be transformed to a Rust type"),
 
         JniType::Option(ty) => {
-            let transform = transform_jni_type_to_rust(ty, param_name);
+            let transform = transform_jni_type_to_rust(ty, param_name, true);
+            let param = syn::parse_str::<TokenStream2>(param_name).unwrap();
 
-            quote! {
+            let q = quote! {
                 let is_null = {
                     let mut env = rc_env.borrow_mut();
-                    env.is_same_object(&#param_name, JObject::null());
+                    env.is_same_object(&#param, jni::objects::JObject::null()).expect("Could not check if object is null")
                 };
                 
-                #param_name = if is_null {
+                let #param = if is_null {
                     Option::None
                 } else {
                     #transform
-                }
-            }
+
+                    // Test
+                    Some(#param)
+                };
+            };
+
+            let qs = q.to_string();
+
+            println!("QS3 IS {qs}");
+
+            q
         }
         JniType::Interface(name) => {
             let struct_name = format!("{name}JniBridge");
@@ -69,9 +80,9 @@ fn transform_jlong_to_receiver(param_name: &str, ty: &str) -> TokenStream2 {
     }
 }
 
-pub fn transform_rust_to_jni_type(jni_type: &JniType, param_name: &str) -> TokenStream2 {
+pub fn transform_rust_to_jni_type(jni_type: &JniType, param_name: &str, is_optional: bool) -> TokenStream2 {
     match jni_type {
-        JniType::Int32 => transform_i32_to_jint(param_name),
+        JniType::Int32 => transform_i32_to_jint(param_name, is_optional),
         JniType::Int64 => transform_i64_to_jlong(param_name),
         JniType::UInt64 => transform_u64_to_jlong(param_name), // TODO This should be unsigned, perhaps use an object?
         JniType::String => transform_string_to_jstring(param_name),
@@ -85,17 +96,40 @@ pub fn transform_rust_to_jni_type(jni_type: &JniType, param_name: &str) -> Token
                     #param.into_env(&mut env)
                 };
             }
-        },
+        }
         JniType::CustomType(_) => transform_custom_to_jobject(param_name),
         JniType::Receiver(_) => todo!(),
-        JniType::Option(ty) => transform_rust_to_jni_type(ty, param_name),
+        JniType::Option(ty) => transform_rust_to_jni_type(ty, param_name, true),
         JniType::Interface(_) => panic!("Transformation from Rust traits to interfaces is not supported"),
         JniType::Void => panic!("Void type can't be transformed"),
     }
 }
 
-fn transform_jint_to_i32(param_name: &str) -> TokenStream2 {
-    transform_types(param_name, quote! { i32 })
+fn transform_jint_to_i32(param_name: &str, is_optional: bool) -> TokenStream2 {
+    if is_optional {
+        let param = syn::parse_str::<TokenStream2>(param_name).unwrap();
+
+        let q = quote! {
+            let #param = {
+                let mut env = rc_env.borrow_mut();
+                let value = env.get_field(&#param, "value", "I")
+                    .expect("Could not find field pointer")
+                    .i()
+                    .expect("Could not transform \"value\" to jint");
+
+                value
+            };
+        };
+
+        let qs = q.to_string();
+
+        println!("QS2 IS {qs}");
+
+        q
+
+    } else {
+        transform_types(param_name, quote! { i32 })
+    }
 }
 
 fn transform_jlong_to_i64(param_name: &str) -> TokenStream2 {
@@ -106,8 +140,31 @@ fn transform_jlong_to_u64(param_name: &str) -> TokenStream2 {
     transform_types(param_name, quote! { u64 })
 }
 
-fn transform_i32_to_jint(param_name: &str) -> TokenStream2 {
-    transform_types(param_name, quote! { jni::sys::jint })
+fn transform_i32_to_jint(param_name: &str, is_optional: bool) -> TokenStream2 {
+    if is_optional {
+        let param = syn::parse_str::<TokenStream2>(param_name).unwrap();
+
+        quote! {
+            let #param = {
+                match #param {
+                    None => {
+                        jni::objects::JObject::null()
+                    }
+                    Some(i) => {
+                        let mut env = rc_env.borrow_mut();
+                        let values: &[jni::objects::JValue] = &[i.into()];
+                        let jv = env
+                            .call_static_method("java/lang/Integer", "valueOf", "(I)Ljava/lang/Integer;", values)
+                            .expect("Unable to load ValueOf from java.lang.Integer");
+
+                        jv.l().expect("Could not get Integer type from valueOf result")
+                    }
+                }
+            };
+        }
+    } else {
+        transform_types(param_name, quote! { jni::sys::jint })
+    }
 }
 
 

@@ -31,15 +31,15 @@ fn generate_rust_jni_binding_function(struct_name: &str, func: &Function) -> Tok
 
     for param in &func.parameters {
         match param {
-            Parameter::Typed { 
-                name, 
-                ty, 
-                is_borrow, 
-                is_mutable 
+            Parameter::Typed {
+                name,
+                ty,
+                is_borrow,
+                is_mutable
             } => {
                 let name = name.to_string();
-                let rust_jni_ty = jni_type_to_jni_type(ty);
-                let transformation = transform_jni_type_to_rust(ty, &name);
+                let rust_jni_ty = jni_type_to_jni_type(ty, false);
+                let transformation = transform_jni_type_to_rust(ty, &name, false);
 
                 let name = syn::parse_str::<TokenStream2>(&name).unwrap();
                 jni_function_parameters.push(quote! { #name: #rust_jni_ty });
@@ -49,11 +49,11 @@ fn generate_rust_jni_binding_function(struct_name: &str, func: &Function) -> Tok
                 let name = "jobject".to_string();
                 let ty = JniType::Receiver(struct_name.to_string());
 
-                let jni_ty = jni_type_to_jni_type(&ty);
+                let jni_ty = jni_type_to_jni_type(&ty, false);
                 let name_token = syn::parse_str::<TokenStream2>(&name).unwrap();
                 jni_function_parameters.push(quote! { #name_token: #jni_ty });
 
-                let transformation = transform_jni_type_to_rust(&ty, &name);
+                let transformation = transform_jni_type_to_rust(&ty, &name, false);
                 jni_to_rust_types_transformations.push(transformation);
             }
         }
@@ -94,7 +94,7 @@ fn generate_rust_jni_binding_function(struct_name: &str, func: &Function) -> Tok
     let return_signature = match &func.return_type {
         None => { quote! {} }
         Some(ty) => {
-            let ret_type = jni_type_to_jni_type(ty);
+            let ret_type = jni_type_to_jni_type(ty, false);
             quote! { -> #ret_type }
         }
     };
@@ -102,7 +102,7 @@ fn generate_rust_jni_binding_function(struct_name: &str, func: &Function) -> Tok
     let result_variable = quote! { result };
 
     let (transform_return, return_statement) = if let Some(ty) = &func.return_type {
-        let transform = transform_rust_to_jni_type(ty, &result_variable.to_string());
+        let transform = transform_rust_to_jni_type(ty, &result_variable.to_string(), false);
         let return_statement = quote! { return #result_variable; };
         (transform, return_statement)
     } else {
@@ -150,17 +150,21 @@ fn rust_fn_call_from_jni_type(jni_type: &JniType, name: &String) -> String {
     }
 }
 
-fn jni_type_to_jni_type(jni_type: &JniType) -> TokenStream2 {
-    match jni_type {
-        JniType::Int32 => quote! { jni::sys::jint },
-        JniType::Int64 => quote! { jni::sys::jlong },
-        JniType::UInt64 => quote! { jni::sys::jlong }, // TODO This should be unsigned, perhaps use an object?
-        JniType::String => quote! { jni::objects::JString<'local> },
-        JniType::Boolean => quote! { jni::sys::jboolean },
-        JniType::ByteArray => quote! { jni::objects::JByteArray },
-        JniType::Interface(_) | JniType::CustomType(_) => quote! { jni::objects::JObject<'local> },
-        JniType::Receiver(_) => quote! { jni::sys::jlong },
-        JniType::Void => todo!(),
-        JniType::Option(ty) => jni_type_to_jni_type(ty),
+fn jni_type_to_jni_type(jni_type: &JniType, is_optional: bool) -> TokenStream2 {
+    if is_optional {
+        quote! { jni::objects::JObject<'local> }
+    } else {
+        match jni_type {
+            JniType::Int32 => quote! { jni::sys::jint },
+            JniType::Int64 => quote! { jni::sys::jlong },
+            JniType::UInt64 => quote! { jni::sys::jlong }, // TODO This should be unsigned, perhaps use an object?
+            JniType::String => quote! { jni::objects::JString<'local> },
+            JniType::Boolean => quote! { jni::sys::jboolean },
+            JniType::ByteArray => quote! { jni::objects::JByteArray },
+            JniType::Interface(_) | JniType::CustomType(_) => quote! { jni::objects::JObject<'local> },
+            JniType::Receiver(_) => quote! { jni::sys::jlong },
+            JniType::Void => todo!(),
+            JniType::Option(ty) => jni_type_to_jni_type(ty, true),
+        }
     }
 }
