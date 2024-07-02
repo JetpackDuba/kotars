@@ -376,6 +376,8 @@ fn jni_to_kotlin_type(ty: &JniType, is_nullable: bool) -> String {
         JniType::Int32 => "Int".to_string(),
         JniType::Int64 => "Long".to_string(),
         JniType::UInt64 => "Long".to_string(), // TODO This should be unsigned, perhaps use an object?
+        JniType::Float32 => "Float".to_string(),
+        JniType::Float64 => "Double".to_string(),
         JniType::String => "String".to_string(),
         JniType::Boolean => "Boolean".to_string(),
         JniType::ByteArray => "ByteArray".to_string(),

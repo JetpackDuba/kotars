@@ -70,6 +70,7 @@ impl Class {
                     } else {
                         format!("{}/{}", package_name_for_signature, #struct_name)
                     };
+                    let error_msg_new_object = format!("New object failed {class_path}");
 
                     let pointer = Box::into_raw(Box::new(self)) as jni::sys::jlong;
                     let constructor_signature = #constructor_signature.replace("<PKG_NAME>/", package_name_for_signature.as_str());
@@ -77,8 +78,8 @@ impl Class {
                     let error_msg = format!("Find class failed for {class_path}");
                     let class = env.find_class(class_path).expect(error_msg.as_str());
 
-                    let constructor_args: &[jni::objects::JValue] = &[pointer.into()]; //vec![s.into()];
-                    let obj = env.new_object(class, constructor_signature.as_str(), constructor_args).expect("New object failed");
+                    let constructor_args: &[jni::objects::JValue] = &[pointer.into()];
+                    let obj = env.new_object(class, constructor_signature.as_str(), constructor_args).expect(&error_msg_new_object);
                     obj
                 }
             }
@@ -141,7 +142,8 @@ impl DataClass {
 
                     let class = {
                         let mut env = rc_env.borrow_mut();
-                        env.find_class(class_path).unwrap()
+                        let error_msg = format!("Could not find class {class_path}");
+                        env.find_class(class_path).expect(&error_msg)
                     };
                     
                     #(#transformations)*
@@ -220,6 +222,8 @@ pub fn jni_type_to_jni_method_signature_type(jni_type: &JniType) -> String {
         JniType::Int32 => "I".to_string(),
         JniType::Int64 | JniType::Receiver(_) => "J".to_string(),
         JniType::UInt64 => "J".to_string(), // TODO This should be unsigned, perhaps use an object?
+        JniType::Float32 => "F".to_string(),
+        JniType::Float64 => "D".to_string(),
         JniType::String => "Ljava/lang/String;".to_string(),
         JniType::Boolean => "Z".to_string(),
         JniType::ByteArray => "[B".to_string(),
@@ -234,7 +238,7 @@ pub fn jni_type_to_jni_method_signature_type(jni_type: &JniType) -> String {
 
 fn generate_field_mapping_into_array(ty: &JniType, param: &TokenStream2) -> TokenStream2 {
     match ty {
-        JniType::Int32 | JniType::Int64 | JniType::Boolean=> {
+        JniType::Int32 | JniType::Int64 | JniType::Float32 | JniType::Float64 | JniType::Boolean=> {
             quote! { #param.into() }
         }
         JniType::UInt64 => {

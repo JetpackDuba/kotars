@@ -224,6 +224,8 @@ pub fn jni_interface(_attr: TokenStream, input: TokenStream) -> TokenStream {
 
                 let transformations = structs::generate_method_fields_transformation(&fields);
                 let params_into_array = structs::generate_struct_fields_mapping_into_array(&fields);
+                
+                let error_msg = format!("Call method [{str_method_name}] with signature [{method_types_signature}] failed with error: {{e}}");
 
                 let q = quote! {
                     fn #method_name(#inputs) #return_type {
@@ -233,10 +235,15 @@ pub fn jni_interface(_attr: TokenStream, input: TokenStream) -> TokenStream {
 
                         let method_args: &[jni::objects::JValue] = &[#(#params_into_array,)*]; //vec![s.into()];
 
-
                         let result = {
                             let mut env = rc_env.borrow_mut();
-                            env.call_method(&self.callback, #str_method_name, #method_types_signature, method_args).unwrap_or_else(|e| panic!("Call method failed with error: {e}!!"))
+                            let r = env.call_method(&self.callback, #str_method_name, #method_types_signature, method_args);
+
+                            if env.exception_check().expect("Failed to check if there is an exception") {
+                                env.exception_describe();
+                            }
+
+                            r.unwrap_or_else(|e| panic!(#error_msg))
                         };
                     }
                 };
@@ -315,6 +322,16 @@ fn rust_property_to_jni_type(
         JniType::UInt64 => {
             quote! {
                 let #param = #struct_parameter as jni::sys::jlong; // TODO This should be unsigned, perhaps use an object?
+            }
+        }
+        JniType::Float32 => {
+            quote! {
+                let #param = #struct_parameter as jni::sys::jfloat; // TODO This should be unsigned, perhaps use an object?
+            }
+        }
+        JniType::Float64 => {
+            quote! {
+                let #param = #struct_parameter as jni::sys::jdouble; // TODO This should be unsigned, perhaps use an object?
             }
         }
         JniType::String => {

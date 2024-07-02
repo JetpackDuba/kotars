@@ -140,7 +140,7 @@ fn generate_rust_jni_binding_function(struct_name: &str, func: &Function) -> Tok
 
 fn rust_fn_call_from_jni_type(jni_type: &JniType, name: &String) -> String {
     match jni_type {
-        JniType::Int32 | JniType::Int64 | JniType::UInt64 | JniType::String | JniType::Boolean => { name.clone() }
+        JniType::Int32 | JniType::Int64 | JniType::UInt64 | JniType::Float32 | JniType::Float64 | JniType::String | JniType::Boolean => { name.clone() }
         JniType::Receiver(_) => { todo!() }
         JniType::ByteArray => { format!("& {name}") }
         JniType::CustomType(_) => { format!("&mut {name}") }
@@ -158,6 +158,8 @@ fn jni_type_to_jni_type(jni_type: &JniType, is_optional: bool) -> TokenStream2 {
             JniType::Int32 => quote! { jni::sys::jint },
             JniType::Int64 => quote! { jni::sys::jlong },
             JniType::UInt64 => quote! { jni::sys::jlong }, // TODO This should be unsigned, perhaps use an object?
+            JniType::Float32 => quote! { jni::sys::jfloat },
+            JniType::Float64 => quote! { jni::sys::jdouble },
             JniType::String => quote! { jni::objects::JString<'local> },
             JniType::Boolean => quote! { jni::sys::jboolean },
             JniType::ByteArray => quote! { jni::objects::JByteArray },

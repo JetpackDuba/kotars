@@ -11,6 +11,8 @@ pub fn transform_jni_type_to_rust(
         JniType::Int32 => transform_jint_to_i32(param_name, is_optional),
         JniType::Int64 => transform_jlong_to_i64(param_name),
         JniType::UInt64 => transform_jlong_to_u64(param_name), // TODO This should be unsigned, perhaps use an object?
+        JniType::Float32 => transform_jfloat_to_f32(param_name),
+        JniType::Float64 => transform_jdouble_to_f64(param_name),
         JniType::String => transform_jstring_to_string(param_name),
         JniType::Boolean => transform_jbool_to_bool(param_name),
         JniType::ByteArray => {
@@ -60,11 +62,11 @@ pub fn transform_jni_type_to_rust(
             let param_rc: TokenStream2 = syn::parse_str(&param_rc_name).unwrap();
 
             quote! {
-                let #param_rc = Rc::new(#param);
+                let #param_rc = std::rc::Rc::new(#param);
 
                 let mut #param = #struct_name {
-                    env: Rc::clone(&rc_env),
-                    callback: Rc::clone(& #param_rc),
+                    env: std::rc::Rc::clone(&rc_env),
+                    callback: std::rc::Rc::clone(& #param_rc),
                 };
             }
         }
@@ -76,7 +78,7 @@ fn transform_jlong_to_receiver(param_name: &str, ty: &str) -> TokenStream2 {
     let ty: TokenStream2 = syn::parse_str(ty).unwrap();
 
     quote! {
-        let #param = unsafe { &mut *(#param as *mut #ty) };
+        let mut #param = unsafe { &mut *(#param as *mut #ty) };
     }
 }
 
@@ -85,6 +87,8 @@ pub fn transform_rust_to_jni_type(jni_type: &JniType, param_name: &str, is_optio
         JniType::Int32 => transform_i32_to_jint(param_name, is_optional),
         JniType::Int64 => transform_i64_to_jlong(param_name),
         JniType::UInt64 => transform_u64_to_jlong(param_name), // TODO This should be unsigned, perhaps use an object?
+        JniType::Float32 => transform_f32_to_jfloat(param_name),
+        JniType::Float64 => transform_f64_to_jdouble(param_name),
         JniType::String => transform_string_to_jstring(param_name),
         JniType::Boolean => transform_bool_to_jbool(param_name),
         JniType::ByteArray => {
@@ -136,6 +140,14 @@ fn transform_jlong_to_i64(param_name: &str) -> TokenStream2 {
     transform_types(param_name, quote! { i64 })
 }
 
+fn transform_jfloat_to_f32(param_name: &str) -> TokenStream2 {
+    transform_types(param_name, quote! { f64 })
+}
+
+fn transform_jdouble_to_f64(param_name: &str) -> TokenStream2 {
+    transform_types(param_name, quote! { f64 })
+}
+
 fn transform_jlong_to_u64(param_name: &str) -> TokenStream2 {
     transform_types(param_name, quote! { u64 })
 }
@@ -174,6 +186,14 @@ fn transform_i64_to_jlong(param_name: &str) -> TokenStream2 {
 
 fn transform_u64_to_jlong(param_name: &str) -> TokenStream2 {
     transform_types(param_name, quote! { jni::sys::jlong })
+}
+
+fn transform_f32_to_jfloat(param_name: &str) -> TokenStream2 {
+    transform_types(param_name, quote! { jni::sys::jfloat })
+}
+
+fn transform_f64_to_jdouble(param_name: &str) -> TokenStream2 {
+    transform_types(param_name, quote! { jni::sys::jdouble })
 }
 
 fn transform_bool_to_jbool(param_name: &str) -> TokenStream2 {

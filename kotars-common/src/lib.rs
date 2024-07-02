@@ -80,6 +80,8 @@ pub enum JniType {
     Int32,
     Int64,
     UInt64,
+    Float32,
+    Float64,
     String,
     Boolean,
     Receiver(String),
@@ -97,6 +99,8 @@ impl From<String> for JniType {
             "i32" => JniType::Int32,
             "i64" => JniType::Int64,
             "u64" => JniType::UInt64,
+            "f32" => JniType::Float32,
+            "f64" => JniType::Float64,
             "String" => JniType::String,
             "bool" => JniType::Boolean,
             _ => {
