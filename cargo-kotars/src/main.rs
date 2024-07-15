@@ -1,10 +1,11 @@
-use std::fmt::format;
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
 use clap::Parser;
-use kotars_common::{Field, Function, JniType, Parameter, RsInterface, RsStruct, string_to_camel_case};
+
+use kotars_common::{Function, JniType, Parameter, RsInterface, RsStruct, string_to_camel_case};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -312,7 +313,7 @@ fn format_interface_function(func: &Function) -> String {
     format!("fun {name}({parameters_formatted}){return_ty}")
 }
 
-fn create_data_class(dir: &Path, rs_struct: &RsStruct, package_name: &str) {
+fn create_data_class(dir: &Path, rs_struct: &RsStruct, _package_name: &str) {
     let class_name = &rs_struct.name;
     let file_name = format!("{class_name}.kt");
 
@@ -333,9 +334,8 @@ fn create_data_class(dir: &Path, rs_struct: &RsStruct, package_name: &str) {
         .collect::<Vec<String>>()
         .join("\n    ");
 
+    // TODO Eventually add package name
     let content = format!(r#"
-//package {package_name}
-
 data class {class_name} (
     {fields}
 )
