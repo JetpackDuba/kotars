@@ -235,14 +235,18 @@ fn create_class(dir: &Path, rs_struct: RsStruct, package_name: &str, functions: 
     let content = format!(r#"
 //package {package_name}
 
-class {class_name} private constructor(private val pointer: Long) : AutoCloseable {{
-    private val resource: NativeResource = thread.addObject(this, pointer) {{ {class_name}Obj.destroy(it) }}
+class {class_name} private constructor(val pointer: Long) : AutoCloseable {{
+    private val resource: NativeResource = thread.addObject(this, pointer, "{class_name}") {{ {class_name}Obj.destroy(it) }}
 
 {member_functions_mapping_formatted}
 
     override fun close() {{
-        resource.close()
-        thread.remove(resource)
+        if (thread.contains(resource)) {{
+            resource.close()
+            thread.remove(resource)
+        }}  else {{
+            println("{class_name} was already closed")
+        }}
     }}
 
     companion object {{

@@ -40,7 +40,6 @@ impl JniGenerator for Class {
 }
 
 impl JniGenerator for DataClass {
-
     fn generated_methods(&self) -> Vec<TokenStream2> {
         let map_to_class: TokenStream2 = self.map_to_data_class_func();
 
@@ -121,7 +120,7 @@ impl DataClass {
         let params_into_array = generate_struct_fields_mapping_into_array(&self.0.fields);
         let constructor_signature = format!("({constructor_types_signature})V");
         let struct_json = serde_json::to_string(&self.0).unwrap();
-        
+
         let header_param = format!("JNI_DATA_CLASS {struct_json}");
         let header_comments = full_header_comment(header_param.as_str());
 
@@ -238,7 +237,7 @@ pub fn jni_type_to_jni_method_signature_type(jni_type: &JniType) -> String {
 
 fn generate_field_mapping_into_array(ty: &JniType, param: &TokenStream2) -> TokenStream2 {
     match ty {
-        JniType::Int32 | JniType::Int64 | JniType::Float32 | JniType::Float64 | JniType::Boolean=> {
+        JniType::Int32 | JniType::Int64 | JniType::Float32 | JniType::Float64 | JniType::Boolean => {
             quote! { #param.into() }
         }
         JniType::UInt64 => {
@@ -267,7 +266,7 @@ impl FromSyn for RsStruct {
                 let original_ty = &field.ty;
                 let ty = quote! { #original_ty }.to_string();
                 let jni_ty: JniType = ty.into();
-                
+
                 Field {
                     is_public: matches!(field.vis, Visibility::Public { .. }),
                     name,

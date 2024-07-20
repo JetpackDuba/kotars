@@ -13,7 +13,7 @@ pub fn transform_jni_type_to_rust(
         JniType::UInt64 => transform_jlong_to_u64(param_name), // TODO This should be unsigned, perhaps use an object?
         JniType::Float32 => transform_jfloat_to_f32(param_name),
         JniType::Float64 => transform_jdouble_to_f64(param_name),
-        JniType::String => transform_jstring_to_string(param_name),
+        JniType::String => transform_jstring_to_string(param_name, is_optional),
         JniType::Boolean => transform_jbool_to_bool(param_name),
         JniType::ByteArray => {
             let param = syn::parse_str::<TokenStream2>(param_name).unwrap();
@@ -130,7 +130,6 @@ fn transform_jint_to_i32(param_name: &str, is_optional: bool) -> TokenStream2 {
         println!("QS2 IS {qs}");
 
         q
-
     } else {
         transform_types(param_name, quote! { i32 })
     }
@@ -241,15 +240,22 @@ fn transform_types(param_name: &str, target_type: TokenStream2) -> TokenStream2 
     quote! { let #param = #param as #target_type; }
 }
 
-fn transform_jstring_to_string(param_name: &str) -> TokenStream2 {
+fn transform_jstring_to_string(param_name: &str, is_optional: bool) -> TokenStream2 {
+    let param_to_get_string = if is_optional {
+        format!("{param_name}.into()")
+    } else {
+        param_name.to_string()
+    };
+
     let param = syn::parse_str::<TokenStream2>(param_name).unwrap();
-    quote! {
-        
+    let param_to_get_string = syn::parse_str::<TokenStream2>(&param_to_get_string).unwrap();
+
+    quote! {        
         let #param: String = {
             let mut env = rc_env.borrow_mut();
             
             env
-            .get_string(&#param)
+            .get_string(&#param_to_get_string)
             .expect("Couldn't get java string!")
             .into()
         };

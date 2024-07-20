@@ -12,9 +12,10 @@ class AutoCloseThread : Thread() {
     fun addObject(
         pTest: AutoCloseable,
         pointer: Long,
+        className: String,
         drop: (Long) -> Unit,
     ): NativeResource {
-        val rs = NativeResource(pointer, drop, pTest, referenceQueue)
+        val rs = NativeResource(pointer, className, drop, pTest, referenceQueue)
         phantomStack.add(rs)
         return rs
     }
@@ -35,20 +36,25 @@ class AutoCloseThread : Thread() {
             println("Thread Interrupted")
         }
     }
+
+    fun contains(rs: NativeResource): Boolean {
+        return phantomStack.contains(rs)
+    }
 }
 
 class NativeResource(
     val pointer: Long,
+    val className: String,
     val drop: (Long) -> Unit,
     referent: AutoCloseable,
     queue: ReferenceQueue<AutoCloseable?>
 ) : PhantomReference<AutoCloseable?>(referent, queue) {
     fun close() {
         drop(pointer)
-        println("Destroyed $pointer")
+        println("$className destroyed $pointer")
     }
 }
 
-var thread: AutoCloseThread = AutoCloseThread().apply {
+val thread: AutoCloseThread = AutoCloseThread().apply {
     start()
 }
