@@ -115,12 +115,6 @@ fn generate_rust_jni_binding_function(struct_name: &str, func: &Function) -> Tok
     let header_param = format!("JNI_FN_DATA {fn_serialized}");
     let header_comments = full_header_comment(header_param.as_str());
 
-    let contains_trait_param = func.parameters
-        .iter()
-        .any(|p| matches!(p, Parameter::Typed { ty: JniType::Interface(_), .. }));
-
-    println!("!Func {} has trait parameter = {}", func.name, contains_trait_param);
-
     quote! {
             #header_comments
             #[no_mangle]
@@ -146,7 +140,8 @@ fn rust_fn_call_from_jni_type(jni_type: &JniType, name: &String) -> String {
         JniType::CustomType(_) => { format!("&mut {name}") }
         JniType::Void => { todo!() }
         JniType::Option(ty) => { rust_fn_call_from_jni_type(ty, name) }
-        JniType::Interface(_) => { format!("&mut {name}") }
+        JniType::Interface(_) => format!("&mut {name}"),
+        JniType::Vec(_) => format!("&mut {name}"),
     }
 }
 
@@ -166,6 +161,7 @@ fn jni_type_to_jni_type(jni_type: &JniType, is_optional: bool) -> TokenStream2 {
             JniType::Interface(_) | JniType::CustomType(_) => quote! { jni::objects::JObject<'local> },
             JniType::Receiver(_) => quote! { jni::sys::jlong },
             JniType::Void => todo!(),
+            JniType::Vec(_) => quote! { jni::sys::jarray },
             JniType::Option(ty) => jni_type_to_jni_type(ty, true),
         }
     }

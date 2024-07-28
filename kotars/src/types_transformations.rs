@@ -27,7 +27,7 @@ pub fn transform_jni_type_to_rust(
         JniType::CustomType(ty) => transform_jobject_to_custom(param_name, ty),
         JniType::Receiver(ty) => transform_jlong_to_receiver(param_name, ty),
         JniType::Void => panic!("Void can't be transformed to a Rust type"),
-
+        JniType::Vec(ty) => todo!("ABDE_Vec2"),//transform_jarray_to_vec(param_name, ty),
         JniType::Option(ty) => {
             let transform = transform_jni_type_to_rust(ty, param_name, true);
             let param = syn::parse_str::<TokenStream2>(param_name).unwrap();
@@ -47,11 +47,7 @@ pub fn transform_jni_type_to_rust(
                     Some(#param)
                 };
             };
-
-            let qs = q.to_string();
-
-            println!("QS3 IS {qs}");
-
+            
             q
         }
         JniType::Interface(name) => {
@@ -72,6 +68,13 @@ pub fn transform_jni_type_to_rust(
         }
     }
 }
+
+// fn transform_jarray_to_vec(param_name: &str, inner_ty: &Box<JniType>) -> TokenStream2 {
+//     let inner_param_name = "iter_item";
+//     let item_transformation = transform_jni_type_to_rust(inner_ty, inner_param_name, false);
+//     
+//     
+// }
 
 fn transform_jlong_to_receiver(param_name: &str, ty: &str) -> TokenStream2 {
     let param: TokenStream2 = syn::parse_str(param_name).unwrap();
@@ -101,6 +104,24 @@ pub fn transform_rust_to_jni_type(jni_type: &JniType, param_name: &str, is_optio
                 };
             }
         }
+        JniType::Vec(ty) => {
+            let individual_item_transformation = transform_rust_to_jni_type(ty, "el", false);
+            let param = syn::parse_str::<TokenStream2>(param_name).unwrap();
+            todo!("Idd2");
+            quote! {
+                let #param: jni::objects::JObjectArray = {
+                    let mut env = rc_env.borrow_mut();
+                    let arr = env.new_object_array(#param.len(), "java/lang/String", "").unwrap();
+                    for (i, el) in #param.iter().enumerate() {
+                        #individual_item_transformation
+
+                        env.set_object_array_element(arr, i, el);
+                    }
+
+                    arr
+                };
+            }
+        }
         JniType::CustomType(_) => transform_custom_to_jobject(param_name),
         JniType::Receiver(_) => todo!(),
         JniType::Option(ty) => transform_rust_to_jni_type(ty, param_name, true),
@@ -124,10 +145,6 @@ fn transform_jint_to_i32(param_name: &str, is_optional: bool) -> TokenStream2 {
                 value
             };
         };
-
-        let qs = q.to_string();
-
-        println!("QS2 IS {qs}");
 
         q
     } else {
@@ -212,7 +229,7 @@ fn transform_custom_to_jobject(param_name: &str) -> TokenStream2 {
 
 fn transform_jobject_to_custom(param_name: &str, ty: &str) -> TokenStream2 {
     let param = syn::parse_str::<TokenStream2>(param_name).unwrap();
-    println!("Ty is after prefix removal: {ty}");
+    
     let ty = syn::parse_str::<TokenStream2>(&ty).unwrap();
     quote! {
         let mut #param = {

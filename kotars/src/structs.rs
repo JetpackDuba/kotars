@@ -231,6 +231,10 @@ pub fn jni_type_to_jni_method_signature_type(jni_type: &JniType) -> String {
             format!("L{name};")
         }
         JniType::Void => "V".to_string(),
+        JniType::Vec(ty) => {
+            let inner_ty = jni_type_to_jni_method_signature_type(ty);
+            format!("[{inner_ty}")
+        },
         JniType::Option(ty) => jni_type_to_jni_method_signature_type(ty),
     }
 }
@@ -243,7 +247,7 @@ fn generate_field_mapping_into_array(ty: &JniType, param: &TokenStream2) -> Toke
         JniType::UInt64 => {
             quote! { #param.into() } // TODO This should be unsigned, perhaps use an object?
         }
-        JniType::CustomType(_) | JniType::Interface(_) | JniType::ByteArray | JniType::String => {
+        JniType::Vec(_) | JniType::CustomType(_) | JniType::Interface(_) | JniType::ByteArray | JniType::String => {
             quote! { #param }
         }
         JniType::Receiver(_) => panic!("Structs can not have self as type"),

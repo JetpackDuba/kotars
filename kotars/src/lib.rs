@@ -13,6 +13,7 @@ use structs::JniGenerator;
 
 use crate::functions::generate_rust_jni_binding_functions;
 use crate::structs::{Class, DataClass, FromSyn};
+use crate::types_transformations::{transform_jni_type_to_rust, transform_rust_to_jni_type};
 
 mod functions;
 mod structs;
@@ -224,7 +225,41 @@ pub fn jni_interface(_attr: TokenStream, input: TokenStream) -> TokenStream {
 
                 let transformations = structs::generate_method_fields_transformation(&fields);
                 let params_into_array = structs::generate_struct_fields_mapping_into_array(&fields);
-                
+                let result_transformation = {
+                    match return_type {
+                        ReturnType::Default => {
+                            quote! {
+                                let r = ();
+                            }
+                        }
+                        ReturnType::Type(_, ty) => {
+                            let jni_ty: JniType = quote::quote!(#ty).to_string().into();
+
+                            let jni_ty_transformation = transform_jni_type_to_rust(&jni_ty, "r", false);
+                            let jvalue_transformation = match jni_ty {
+                                JniType::Int32 => quote! { r.i() },
+                                JniType::Int64 => quote! { r.j() },
+                                JniType::Float32 => quote! { r.f() },
+                                JniType::Float64 => quote! { r.d() },
+                                JniType::Boolean => quote! { r.z() },
+                                JniType::UInt64 | JniType::Receiver(_) |
+                                JniType::CustomType(_) |
+                                JniType::Interface(_) |
+                                JniType::String |
+                                JniType::Option(_) |
+                                JniType::ByteArray => todo!(),
+                                JniType::Void => quote! { () },
+                                JniType::Vec(_) => todo!(),
+                            };
+
+                            quote! {
+                                let r = #jvalue_transformation.unwrap() ;
+                                #jni_ty_transformation
+                            }
+                        }
+                    }
+                };
+
                 let error_msg = format!("Call method [{str_method_name}] with signature [{method_types_signature}] failed with error: {{e}}");
 
                 let q = quote! {
@@ -233,18 +268,20 @@ pub fn jni_interface(_attr: TokenStream, input: TokenStream) -> TokenStream {
 
                         #(#transformations)*
 
-                        let method_args: &[jni::objects::JValue] = &[#(#params_into_array,)*]; //vec![s.into()];
+                        let method_args: &[jni::objects::JValue] = &[#(#params_into_array,)*];
 
                         let result = {
                             let mut env = rc_env.borrow_mut();
                             let r = env.call_method(&self.callback, #str_method_name, #method_types_signature, method_args);
 
-                            if env.exception_check().expect("Failed to check if there is an exception") {
-                                env.exception_describe();
-                            }
+                            let r = r.unwrap_or_else(|e| panic!(#error_msg));
 
-                            r.unwrap_or_else(|e| panic!(#error_msg))
+                            #result_transformation
+
+                            r
                         };
+
+                        result
                     }
                 };
 
@@ -369,13 +406,35 @@ fn rust_property_to_jni_type(
         }
         JniType::Interface(_) => todo!(),
         JniType::Void => todo!(),
+        JniType::Vec(ty) => {
+            if let JniType::String = ty.as_ref() {
+                let individual_item_transformation = transform_rust_to_jni_type(ty, "el", false);
+                quote! {
+                    let #param = {
+                        let mut env = rc_env.borrow_mut();
+                        let default = env.new_string("".to_string())
+                            .unwrap();
+                        let arr = env.new_object_array(#param.len() as jni::sys::jsize, "java/lang/String", default).unwrap();
+                        for (i, el) in #param.iter().enumerate() {
+                            #individual_item_transformation
+
+                            env.set_object_array_element(&arr, i as jni::sys::jsize, el).expect("Set object array element failed");
+                        }
+
+                        arr
+                    };
+                    let #param: jni::objects::JValue = (&#param).into();
+                }
+            } else {
+                todo!("Only string vectors supported for now")
+            }
+        }
         JniType::Option(ty) => {
-            
             todo!()
             // quote! {
             //     env.is_same_object(&callback, JObject::null());
             // }
-        },
+        }
     }
 }
 
@@ -414,10 +473,10 @@ fn get_parameters_from_method(inputs: &Punctuated<FnArg, Comma>) -> Vec<Paramete
                         .replace("mut", "")
                         .trim()
                         .to_string();
-                    
+
                     let is_borrow = ty.contains('&');
                     let is_mutable = ty.contains("mut");
-                    
+
                     Parameter::Typed {
                         name: quote! {#pat}.to_string(),
                         ty: ty_name.into(),
