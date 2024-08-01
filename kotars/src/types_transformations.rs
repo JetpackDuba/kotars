@@ -86,8 +86,8 @@ fn transform_jlong_to_receiver(param_name: &str, ty: &str) -> TokenStream2 {
 }
 
 pub fn transform_rust_to_jni_type(
-    jni_type: &JniType, 
-    param_name: &str, 
+    jni_type: &JniType,
+    param_name: &str,
     is_optional: bool,
     is_nested_transformation: bool,
 ) -> TokenStream2 {
@@ -127,7 +127,7 @@ pub fn transform_rust_to_jni_type(
                 };
             }
         }
-        JniType::CustomType(_) => transform_custom_to_jobject(param_name),
+        JniType::CustomType(_) => transform_custom_to_jobject(param_name, is_optional),
         JniType::Receiver(_) => todo!(),
         JniType::Option(ty) => transform_rust_to_jni_type(ty, param_name, true, false),
         JniType::Interface(_) => panic!("Transformation from Rust traits to interfaces is not supported"),
@@ -221,14 +221,33 @@ fn transform_bool_to_jbool(param_name: &str) -> TokenStream2 {
     transform_types(param_name, quote! { jni::sys::jboolean })
 }
 
-fn transform_custom_to_jobject(param_name: &str) -> TokenStream2 {
+fn transform_custom_to_jobject(param_name: &str, is_optional: bool) -> TokenStream2 {
     let param = syn::parse_str::<TokenStream2>(param_name).unwrap();
-    quote! {
-        
-        let mut #param = {
-            let mut env = rc_env.borrow_mut();
-            #param.into_env(&mut env)
-        }; 
+
+    if is_optional {
+        let param = syn::parse_str::<TokenStream2>(param_name).unwrap();
+        let object_transformation = transform_custom_to_jobject(param_name, false);
+        quote! {
+            let #param = {
+                match #param {
+                    None => {
+                        jni::objects::JObject::null()
+                    }
+                    Some(#param) => {
+                        #object_transformation
+
+                        #param
+                    }
+                }
+            };
+        }
+    } else {
+        quote! {
+            let mut #param = {
+                let mut env = rc_env.borrow_mut();
+                #param.into_env(&mut env)
+            };
+        }
     }
 }
 
