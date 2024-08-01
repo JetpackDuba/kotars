@@ -27,7 +27,7 @@ pub fn transform_jni_type_to_rust(
         JniType::CustomType(ty) => transform_jobject_to_custom(param_name, ty),
         JniType::Receiver(ty) => transform_jlong_to_receiver(param_name, ty),
         JniType::Void => panic!("Void can't be transformed to a Rust type"),
-        JniType::Vec(ty) => todo!("ABDE_Vec2"),//transform_jarray_to_vec(param_name, ty),
+        JniType::Vec(ty) => todo!("ABDE_Vec2"), //transform_jarray_to_vec(param_name, ty),
         JniType::Option(ty) => {
             let transform = transform_jni_type_to_rust(ty, param_name, true);
             let param = syn::parse_str::<TokenStream2>(param_name).unwrap();
@@ -47,7 +47,7 @@ pub fn transform_jni_type_to_rust(
                     Some(#param)
                 };
             };
-            
+
             q
         }
         JniType::Interface(name) => {
@@ -85,14 +85,19 @@ fn transform_jlong_to_receiver(param_name: &str, ty: &str) -> TokenStream2 {
     }
 }
 
-pub fn transform_rust_to_jni_type(jni_type: &JniType, param_name: &str, is_optional: bool) -> TokenStream2 {
+pub fn transform_rust_to_jni_type(
+    jni_type: &JniType, 
+    param_name: &str, 
+    is_optional: bool,
+    is_nested_transformation: bool,
+) -> TokenStream2 {
     match jni_type {
         JniType::Int32 => transform_i32_to_jint(param_name, is_optional),
         JniType::Int64 => transform_i64_to_jlong(param_name),
         JniType::UInt64 => transform_u64_to_jlong(param_name), // TODO This should be unsigned, perhaps use an object?
         JniType::Float32 => transform_f32_to_jfloat(param_name),
         JniType::Float64 => transform_f64_to_jdouble(param_name),
-        JniType::String => transform_string_to_jstring(param_name),
+        JniType::String => transform_string_to_jstring(param_name, is_nested_transformation),
         JniType::Boolean => transform_bool_to_jbool(param_name),
         JniType::ByteArray => {
             let param = syn::parse_str::<TokenStream2>(param_name).unwrap();
@@ -105,7 +110,7 @@ pub fn transform_rust_to_jni_type(jni_type: &JniType, param_name: &str, is_optio
             }
         }
         JniType::Vec(ty) => {
-            let individual_item_transformation = transform_rust_to_jni_type(ty, "el", false);
+            let individual_item_transformation = transform_rust_to_jni_type(ty, "el", false, true);
             let param = syn::parse_str::<TokenStream2>(param_name).unwrap();
             todo!("Idd2");
             quote! {
@@ -124,7 +129,7 @@ pub fn transform_rust_to_jni_type(jni_type: &JniType, param_name: &str, is_optio
         }
         JniType::CustomType(_) => transform_custom_to_jobject(param_name),
         JniType::Receiver(_) => todo!(),
-        JniType::Option(ty) => transform_rust_to_jni_type(ty, param_name, true),
+        JniType::Option(ty) => transform_rust_to_jni_type(ty, param_name, true, false),
         JniType::Interface(_) => panic!("Transformation from Rust traits to interfaces is not supported"),
         JniType::Void => panic!("Void type can't be transformed"),
     }
@@ -229,7 +234,7 @@ fn transform_custom_to_jobject(param_name: &str) -> TokenStream2 {
 
 fn transform_jobject_to_custom(param_name: &str, ty: &str) -> TokenStream2 {
     let param = syn::parse_str::<TokenStream2>(param_name).unwrap();
-    
+
     let ty = syn::parse_str::<TokenStream2>(&ty).unwrap();
     quote! {
         let mut #param = {
@@ -272,18 +277,26 @@ fn transform_jstring_to_string(param_name: &str, is_optional: bool) -> TokenStre
             let mut env = rc_env.borrow_mut();
             
             env
-            .get_string(&#param_to_get_string)
-            .expect("Couldn't get java string!")
-            .into()
+                .get_string(&#param_to_get_string)
+                .expect("Couldn't get java string!")
+                .into()
         };
     }
 }
 
-fn transform_string_to_jstring(param_name: &str) -> TokenStream2 {
+fn transform_string_to_jstring(param_name: &str, is_nested_transformation: bool) -> TokenStream2 {
     let param = syn::parse_str::<TokenStream2>(param_name).unwrap();
+    let env_instance = if is_nested_transformation {
+        quote! {}
+    } else {
+        quote! { let mut env = rc_env.borrow(); }
+    };
     quote! {
-        let #param = env
-            .new_string(#param)
-            .expect("Couldn't create java string!");
+        let #param = {
+            #env_instance
+            env
+                .new_string(#param)
+                .expect("Couldn't create java string!")
+        };
     }
 }

@@ -102,7 +102,7 @@ fn generate_rust_jni_binding_function(struct_name: &str, func: &Function) -> Tok
     let result_variable = quote! { result };
 
     let (transform_return, return_statement) = if let Some(ty) = &func.return_type {
-        let transform = transform_rust_to_jni_type(ty, &result_variable.to_string(), false);
+        let transform = transform_rust_to_jni_type(ty, &result_variable.to_string(), false, false);
         let return_statement = quote! { return #result_variable; };
         (transform, return_statement)
     } else {

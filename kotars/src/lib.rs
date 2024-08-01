@@ -371,7 +371,7 @@ fn rust_property_to_jni_type(
                 let #param = #struct_parameter as jni::sys::jdouble; // TODO This should be unsigned, perhaps use an object?
             }
         }
-        JniType::String => {
+        JniType::String => {            
             quote! {
                 let #param: jni::objects::JString = {
                     let mut env = rc_env.borrow_mut();
@@ -408,7 +408,7 @@ fn rust_property_to_jni_type(
         JniType::Void => todo!(),
         JniType::Vec(ty) => {
             if let JniType::String = ty.as_ref() {
-                let individual_item_transformation = transform_rust_to_jni_type(ty, "el", false);
+                let individual_item_transformation = transform_rust_to_jni_type(ty, "el", false, true);
                 quote! {
                     let #param = {
                         let mut env = rc_env.borrow_mut();
