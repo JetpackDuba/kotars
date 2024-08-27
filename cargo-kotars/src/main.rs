@@ -34,9 +34,12 @@ fn main() {
     let res = command.output().expect("Output read failed");
     let out_text = String::from_utf8_lossy(&res.stdout);
     let err = String::from_utf8_lossy(&res.stderr);
-
     let text = out_text.to_string();
     let lines = text.split('\n');
+
+    if !err.is_empty() && text.is_empty() {
+        panic!("{err}")
+    }
 
     let package_name = lines.clone()
         .filter_map(|line| {
@@ -62,7 +65,7 @@ fn main() {
                 let range_start = line.find(prefix_to_remove).expect("JNI_FN_DATA not found.") + prefix_to_remove.len();
                 let range_end = line.len() - 2;
                 let json_line = &line[range_start..range_end].replace('\\', "");
-                
+
                 let func: Function = serde_json::from_str(json_line).unwrap_or_else(|_| panic!("Unable to deserialize function {json_line}"));
                 Some(func)
             } else {
@@ -392,7 +395,7 @@ fn jni_to_kotlin_type(ty: &JniType, is_nullable: bool) -> String {
         JniType::Vec(ty) => {
             let ty_name = jni_to_kotlin_type(ty, false);
             format!("Array<{ty_name}>")
-        },
+        }
     };
 
     if is_nullable {
